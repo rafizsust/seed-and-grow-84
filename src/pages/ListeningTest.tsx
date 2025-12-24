@@ -23,6 +23,8 @@ import { SubmitConfirmDialog } from '@/components/common/SubmitConfirmDialog';
 import { RestoreTestStateDialog } from '@/components/common/RestoreTestStateDialog';
 import { Badge } from '@/components/ui/badge';
 import { useFullscreenTest } from '@/hooks/useFullscreenTest';
+import { useSwipeGesture } from '@/hooks/useSwipeGesture';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 
 interface Question {
@@ -128,6 +130,26 @@ export default function ListeningTest() {
   const [testStarted, setTestStarted] = useState(false);
   const hasAutoSubmitted = useRef(false);
   const [mobileView, setMobileView] = useState<'questions' | 'audio'>('questions');
+  const isMobile = useIsMobile();
+
+  // Swipe gesture to navigate between parts on mobile
+  const swipeHandlers = useSwipeGesture({
+    onSwipeLeft: () => {
+      if (isMobile && activePartIndex < LISTENING_PART_RANGES.length - 1) {
+        const newIndex = activePartIndex + 1;
+        setActivePartIndex(newIndex);
+        setCurrentQuestion(LISTENING_PART_RANGES[newIndex].start);
+      }
+    },
+    onSwipeRight: () => {
+      if (isMobile && activePartIndex > 0) {
+        const newIndex = activePartIndex - 1;
+        setActivePartIndex(newIndex);
+        setCurrentQuestion(LISTENING_PART_RANGES[newIndex].start);
+      }
+    },
+    minSwipeDistance: 80,
+  });
 
   const questionTypeMap: Record<string, string> = {
     // URL slug -> DB/renderer type (normalized)
@@ -846,7 +868,10 @@ export default function ListeningTest() {
             </div>
 
             {/* Mobile: Switch between Questions and Audio based on mobileView */}
-            <div className="md:hidden h-full flex flex-col">
+            <div 
+              className="md:hidden h-full flex flex-col"
+              {...swipeHandlers}
+            >
               {mobileView === 'questions' ? (
                 <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 pb-20 bg-white font-[var(--font-ielts)] text-foreground">
                   <ListeningQuestions 

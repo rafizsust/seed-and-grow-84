@@ -22,6 +22,8 @@ import { RestoreTestStateDialog } from '@/components/common/RestoreTestStateDial
 import { TestEntryOverlay } from '@/components/common/TestEntryOverlay';
 import { Badge } from '@/components/ui/badge';
 import { useFullscreenTest } from '@/hooks/useFullscreenTest';
+import { useSwipeGesture } from '@/hooks/useSwipeGesture';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 
 interface Question {
@@ -124,8 +126,36 @@ export default function ReadingTest() {
   
   // Mobile view state - 'passage' or 'questions'
   const [mobileView, setMobileView] = useState<'passage' | 'questions'>('passage');
+  const isMobile = useIsMobile();
 
-  // Map URL question types to database question types
+  // Swipe gesture to navigate between parts on mobile
+  const swipeHandlers = useSwipeGesture({
+    onSwipeLeft: () => {
+      if (isMobile && currentPassageIndex < passages.length - 1) {
+        const newIndex = currentPassageIndex + 1;
+        setCurrentPassageIndex(newIndex);
+        const passageQuestions = questions
+          .filter(q => q.passage_id === passages[newIndex]?.id)
+          .sort((a, b) => a.question_number - b.question_number);
+        if (passageQuestions.length > 0) {
+          setCurrentQuestion(passageQuestions[0].question_number);
+        }
+      }
+    },
+    onSwipeRight: () => {
+      if (isMobile && currentPassageIndex > 0) {
+        const newIndex = currentPassageIndex - 1;
+        setCurrentPassageIndex(newIndex);
+        const passageQuestions = questions
+          .filter(q => q.passage_id === passages[newIndex]?.id)
+          .sort((a, b) => a.question_number - b.question_number);
+        if (passageQuestions.length > 0) {
+          setCurrentQuestion(passageQuestions[0].question_number);
+        }
+      }
+    },
+    minSwipeDistance: 80,
+  });
   const questionTypeMap: Record<string, string> = {
     'true-false-not-given': 'TRUE_FALSE_NOT_GIVEN',
     'yes-no-not-given': 'YES_NO_NOT_GIVEN',
@@ -1030,7 +1060,10 @@ export default function ReadingTest() {
             </div>
 
             {/* Mobile: Single Panel View - hidden on desktop */}
-            <div className="md:hidden h-full flex flex-col relative">
+            <div 
+              className="md:hidden h-full flex flex-col relative"
+              {...swipeHandlers}
+            >
               {/* Mobile Passage View */}
               {mobileView === 'passage' && (
                 <div 
