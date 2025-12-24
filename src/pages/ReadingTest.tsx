@@ -8,7 +8,7 @@ import { ReadingQuestions } from '@/components/reading/ReadingQuestions';
 import { ReadingTimer } from '@/components/reading/ReadingTimer';
 import { ReadingNavigation } from '@/components/reading/ReadingNavigation';
 import { TestOptionsMenu, ContrastMode, TextSizeMode } from '@/components/reading/TestOptionsMenu';
-import { StickyNote, Filter, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { StickyNote, Filter, X, ArrowLeft, ArrowRight } from 'lucide-react';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -990,7 +990,7 @@ export default function ReadingTest() {
                     }}
                     disabled={displayQuestions.findIndex(q => q.question_number === currentQuestion) === 0}
                   >
-                    <ChevronLeft size={24} strokeWidth={2} />
+                    <ArrowLeft size={24} strokeWidth={2.5} />
                   </button>
                   <button 
                     className="ielts-nav-arrow ielts-nav-arrow-primary"
@@ -1004,7 +1004,7 @@ export default function ReadingTest() {
                       }
                     }}
                   >
-                    <ChevronRight size={24} strokeWidth={2} />
+                    <ArrowRight size={24} strokeWidth={2.5} />
                   </button>
                 </div>
               </div>

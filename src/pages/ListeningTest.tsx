@@ -11,7 +11,7 @@ import {
   AudioPlayOverlay,
 } from '@/components/listening';
 import { TestOptionsMenu, ContrastMode, TextSizeMode } from '@/components/reading/TestOptionsMenu';
-import { Filter, X, ChevronLeft, ChevronRight, StickyNote } from 'lucide-react';
+import { Filter, X, ArrowLeft, ArrowRight, StickyNote } from 'lucide-react';
 import {
   ResizablePanel,
   ResizablePanelGroup,
@@ -785,7 +785,7 @@ export default function ListeningTest() {
                       }}
                       disabled={currentQuestion === displayQuestions[0]?.question_number}
                     >
-                      <ChevronLeft size={24} strokeWidth={2} />
+                      <ArrowLeft size={24} strokeWidth={2.5} />
                     </button>
                     <button 
                       className="ielts-nav-arrow ielts-nav-arrow-primary"
@@ -801,7 +801,7 @@ export default function ListeningTest() {
                         }
                       }}
                     >
-                      <ChevronRight size={24} strokeWidth={2} />
+                      <ArrowRight size={24} strokeWidth={2.5} />
                     </button>
                   </div>
                 </div>
