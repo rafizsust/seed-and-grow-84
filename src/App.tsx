@@ -108,6 +108,8 @@ const App = () => (
             <Route path="/ai-practice/test/:testId" element={<AIPracticeTest />} />
             <Route path="/ai-practice/writing/:testId" element={<AIPracticeWritingTest />} />
             <Route path="/ai-practice/speaking/:testId" element={<AIPracticeSpeakingTest />} />
+            <Route path="/ai-practice/reading/:testId" element={<AIPracticeReadingTest />} />
+            <Route path="/ai-practice/listening/:testId" element={<AIPracticeListeningTest />} />
             <Route path="/ai-practice/results/:testId" element={<AIPracticeResults />} />
             {/* Admin Routes */}
             <Route path="/admin" element={<AdminLayout />}>
