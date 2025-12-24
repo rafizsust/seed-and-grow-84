@@ -400,9 +400,9 @@ export function ListeningNavigation({
                     })()}
                   </div>
                 ) : (
-                  /* Inactive part bar */
+                  /* Inactive part bar - hidden on mobile */
                   <div 
-                    className={cn("w-full shrink-0", p.complete ? "bg-green-600" : "bg-transparent")}
+                    className={cn("hidden md:block w-full shrink-0", p.complete ? "bg-green-600" : "bg-transparent")}
                     style={{ height: BAR_HEIGHT }}
                   />
                 )}
