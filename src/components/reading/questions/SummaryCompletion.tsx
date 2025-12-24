@@ -67,7 +67,7 @@ export function SummaryCompletion({ question, answer, onAnswerChange, isActive, 
                     <Select value={answer || ''} onValueChange={onAnswerChange}>
                       <SelectTrigger 
                         className={cn(
-                          "w-28 h-7 text-sm inline-flex mx-1 rounded-[3px]",
+                          "min-w-[174px] h-7 text-sm inline-flex mx-1 rounded-[3px]",
                           "bg-[hsl(var(--ielts-input-bg,0_0%_100%))] border border-[hsl(var(--ielts-input-border))] text-foreground",
                           "focus:border-[hsl(var(--ielts-input-focus))] focus:ring-0",
                           isActive && "border-[hsl(var(--ielts-input-focus))] border-2"
