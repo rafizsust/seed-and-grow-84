@@ -835,6 +835,35 @@ export default function ReadingTest() {
             <p>Read the text and answer questions {getPassageQuestionRange()}.</p>
           </div>
 
+          {/* Mobile Passage Switcher Tabs - hidden on desktop */}
+          {passages.length > 1 && (
+            <div className="md:hidden flex border-b border-border bg-muted/50 overflow-x-auto scrollbar-none">
+              {passages.map((p, idx) => (
+                <button
+                  key={p.id}
+                  className={cn(
+                    "flex-1 min-w-0 py-2 px-3 text-sm font-medium text-center transition-colors whitespace-nowrap",
+                    idx === currentPassageIndex
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
+                  onClick={() => {
+                    setCurrentPassageIndex(idx);
+                    // Jump to first question of this passage
+                    const passageQuestions = questions
+                      .filter(q => q.passage_id === p.id)
+                      .sort((a, b) => a.question_number - b.question_number);
+                    if (passageQuestions.length > 0) {
+                      setCurrentQuestion(passageQuestions[0].question_number);
+                    }
+                  }}
+                >
+                  Part {p.passage_number}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Mobile View Switcher - hidden on desktop */}
           <div className="md:hidden flex border-b border-border bg-muted/30">
             <button
