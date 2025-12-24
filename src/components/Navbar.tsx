@@ -178,7 +178,16 @@ export const Navbar = () => {
                 )}
               </li>
             ))}
-            {/* Analytics & Flashcards */}
+            {/* Analytics & Flashcards & AI Practice */}
+            <li>
+              <Link
+                to="/ai-practice"
+                className="nav-link flex items-center gap-2 py-3 px-4"
+              >
+                <Sparkles size={16} className="text-primary" />
+                AI Practice
+              </Link>
+            </li>
             <li>
               <Link
                 to="/analytics"
@@ -235,7 +244,13 @@ export const Navbar = () => {
                 )}
               </div>
             ))}
-            <div className="flex gap-2 mt-4">
+            <div className="grid grid-cols-3 gap-2 mt-4">
+              <Link to="/ai-practice" className="flex-1">
+                <Button variant="outline" className="w-full gap-2">
+                  <Sparkles size={16} />
+                  AI Practice
+                </Button>
+              </Link>
               <Link to="/analytics" className="flex-1">
                 <Button variant="outline" className="w-full gap-2">
                   <BarChart3 size={16} />
