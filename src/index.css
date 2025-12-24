@@ -2232,9 +2232,10 @@ body.ielts-theme-yellow-on-black .ielts-mcq-option--selected {
 
 /* ===== IELTS Submit Button - Responsive ===== */
 .ielts-submit-btn {
-  height: 40px;
-  width: 52px;
+  height: 32px;
+  width: 40px;
   border-radius: 0;
+  flex-shrink: 0;
 }
 
 @media (min-width: 768px) {

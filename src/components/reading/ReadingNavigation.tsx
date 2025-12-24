@@ -342,8 +342,8 @@ export function ReadingNavigation({
   return (
     <footer className="bg-card shrink-0">
       {/* Progress indicator bars - at top edge */}
-      <div className="flex w-full overflow-x-auto scrollbar-none" style={{ paddingLeft: NAV_HORIZONTAL_PADDING, paddingRight: NAV_HORIZONTAL_PADDING }}>
-        <div className="flex min-w-0 flex-1">
+      <div className="flex w-full" style={{ paddingLeft: NAV_HORIZONTAL_PADDING, paddingRight: NAV_HORIZONTAL_PADDING }}>
+        <div className="flex min-w-0 flex-1 overflow-x-auto scrollbar-none">
           {parts.map((p) => {
             const isActive = currentPassageIndex === p.index;
             
@@ -391,14 +391,12 @@ export function ReadingNavigation({
             );
           })}
         </div>
-        {/* Spacer for submit button */}
-        <div className="shrink-0 ml-8" style={{ width: 64 }} />
       </div>
       
       {/* Content row - numbers centered */}
-      <div className="flex w-full items-center overflow-x-auto scrollbar-none" style={{ paddingLeft: NAV_HORIZONTAL_PADDING, paddingRight: NAV_HORIZONTAL_PADDING }}>
+      <div className="flex w-full items-center" style={{ paddingLeft: NAV_HORIZONTAL_PADDING, paddingRight: NAV_HORIZONTAL_PADDING }}>
         {/* Parts container */}
-        <div className="flex min-w-0 flex-1 items-center">
+        <div className="flex min-w-0 flex-1 items-center overflow-x-auto scrollbar-none">
           {parts.map((p) => {
             const isActive = currentPassageIndex === p.index;
 
@@ -500,8 +498,8 @@ export function ReadingNavigation({
           })}
         </div>
 
-        {/* Submit button */}
-        <div className="flex shrink-0 items-center ml-4 md:ml-8">
+        {/* Submit button - fixed position on mobile */}
+        <div className="flex shrink-0 items-center ml-2 md:ml-8">
           <button
             className={cn(
               "transition-colors flex items-center justify-center ielts-submit-btn",
@@ -512,7 +510,7 @@ export function ReadingNavigation({
             onClick={onSubmit}
             title="Submit test"
           >
-            <Check size={20} className="md:hidden" strokeWidth={2.5} />
+            <Check size={18} className="md:hidden" strokeWidth={2.5} />
             <Check size={24} className="hidden md:block" strokeWidth={2.5} />
           </button>
         </div>
