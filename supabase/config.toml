@@ -35,3 +35,6 @@ verify_jwt = true
 
 [functions.admin-listening-action]
 verify_jwt = false
+
+[functions.generate-ai-practice]
+verify_jwt = true

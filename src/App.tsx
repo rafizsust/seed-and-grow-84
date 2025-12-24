@@ -29,6 +29,9 @@ import PromotionCodesAdmin from "./pages/admin/PromotionCodesAdmin";
 import FullMockTest from "./pages/FullMockTest";
 import GenerateListeningPOC from "./pages/GenerateListeningPOC";
 import TestComparison from "./pages/TestComparison";
+import AIPractice from "./pages/AIPractice";
+import AIPracticeTest from "./pages/AIPracticeTest";
+import AIPracticeResults from "./pages/AIPracticeResults";
 // Admin pages
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -96,6 +99,10 @@ const App = () => (
             {/* Test Comparison */}
             <Route path="/compare" element={<TestComparison />} />
             
+            {/* AI Practice */}
+            <Route path="/ai-practice" element={<AIPractice />} />
+            <Route path="/ai-practice/test/:testId" element={<AIPracticeTest />} />
+            <Route path="/ai-practice/results/:testId" element={<AIPracticeResults />} />
             {/* Admin Routes */}
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />
