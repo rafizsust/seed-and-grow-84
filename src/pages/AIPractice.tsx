@@ -41,23 +41,29 @@ import {
 } from '@/types/aiPractice';
 import { Link } from 'react-router-dom';
 
-// Question type options
+// Question type options - ALL IELTS QUESTION TYPES
 const READING_QUESTION_TYPES: { value: ReadingQuestionType; label: string; description: string }[] = [
   { value: 'TRUE_FALSE_NOT_GIVEN', label: 'True/False/Not Given', description: 'Decide if statements match the passage' },
-  { value: 'MULTIPLE_CHOICE', label: 'Multiple Choice', description: 'Choose the correct answer from options' },
+  { value: 'MULTIPLE_CHOICE', label: 'Multiple Choice (Single)', description: 'Choose one correct answer' },
+  { value: 'MULTIPLE_CHOICE_MULTIPLE', label: 'Multiple Choice (Multi)', description: 'Choose multiple correct answers' },
   { value: 'FILL_IN_BLANK', label: 'Fill in the Blank', description: 'Complete sentences with words from passage' },
   { value: 'MATCHING_HEADINGS', label: 'Matching Headings', description: 'Match paragraphs with suitable headings' },
   { value: 'MATCHING_INFORMATION', label: 'Matching Information', description: 'Match statements to paragraphs' },
   { value: 'SENTENCE_COMPLETION', label: 'Sentence Completion', description: 'Complete sentences with given words' },
-  { value: 'SUMMARY_COMPLETION', label: 'Summary Completion', description: 'Fill in a summary of the passage' },
+  { value: 'SUMMARY_COMPLETION', label: 'Summary/Word Bank', description: 'Fill in a summary using word bank' },
+  { value: 'TABLE_COMPLETION', label: 'Table Completion', description: 'Complete a table with information' },
+  { value: 'FLOWCHART_COMPLETION', label: 'Flowchart Completion', description: 'Complete steps in a process flowchart' },
+  { value: 'NOTE_COMPLETION', label: 'Note Completion', description: 'Complete notes with missing information' },
 ];
 
 const LISTENING_QUESTION_TYPES: { value: ListeningQuestionType; label: string; description: string }[] = [
   { value: 'FILL_IN_BLANK', label: 'Fill in the Blank', description: 'Complete notes while listening' },
   { value: 'MULTIPLE_CHOICE_SINGLE', label: 'Multiple Choice (Single)', description: 'Choose one correct answer' },
-  { value: 'MULTIPLE_CHOICE_MULTIPLE', label: 'Multiple Choice (Multiple)', description: 'Choose multiple correct answers' },
+  { value: 'MULTIPLE_CHOICE_MULTIPLE', label: 'Multiple Choice (Multi)', description: 'Choose multiple correct answers' },
   { value: 'MATCHING_CORRECT_LETTER', label: 'Matching', description: 'Match items with options' },
   { value: 'TABLE_COMPLETION', label: 'Table Completion', description: 'Complete a table with information' },
+  { value: 'FLOWCHART_COMPLETION', label: 'Flowchart Completion', description: 'Complete process steps' },
+  { value: 'DRAG_AND_DROP_OPTIONS', label: 'Drag and Drop', description: 'Drag options to correct positions' },
 ];
 
 const WRITING_TASK_TYPES: { value: WritingTaskType; label: string; description: string }[] = [
