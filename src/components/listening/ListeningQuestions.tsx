@@ -422,27 +422,39 @@ export function ListeningQuestions({
                 renderRichText={renderRichText}
               />
             ) : group.question_type === 'FLOWCHART_COMPLETION' ? (
-              <FlowchartCompletion
-                testId={testId}
-                groupId={group.id}
-                instruction={group.instruction || 'Complete the flowchart. Choose the correct answer and move it into the gap.'}
-                title={group.options?.title}
-                flowchartSteps={(group.options?.steps || []).map((step: any, idx: number) => ({
-                  id: `${group.id}-step-${idx}`,
-                  text: step.text || '',
-                  hasBlank: step.hasBlank || false,
-                  blankNumber: step.blankNumber,
-                  alignment: step.alignment,
-                }))}
-                groupOptions={group.options?.options || []}
-                groupOptionFormat={group.options?.option_format || 'A'}
-                answers={answers}
-                onAnswerChange={onAnswerChange}
-                onQuestionFocus={setCurrentQuestion}
-                fontSize={fontSize}
-                renderRichText={renderRichText}
-                questionRange={questionRange}
-              />
+              <div className="space-y-4">
+                {/* Show generated flowchart image if available */}
+                {group.options?.imageUrl && (
+                  <div className="mb-4">
+                    <img 
+                      src={group.options.imageUrl} 
+                      alt={group.options?.title || 'Flowchart diagram'}
+                      className="max-w-full h-auto rounded-lg border border-border"
+                    />
+                  </div>
+                )}
+                <FlowchartCompletion
+                  testId={testId}
+                  groupId={group.id}
+                  instruction={group.instruction || 'Complete the flowchart. Choose the correct answer and move it into the gap.'}
+                  title={group.options?.title}
+                  flowchartSteps={(group.options?.steps || []).map((step: any, idx: number) => ({
+                    id: `${group.id}-step-${idx}`,
+                    text: step.text || '',
+                    hasBlank: step.hasBlank || false,
+                    blankNumber: step.blankNumber,
+                    alignment: step.alignment,
+                  }))}
+                  groupOptions={group.options?.options || []}
+                  groupOptionFormat={group.options?.option_format || 'A'}
+                  answers={answers}
+                  onAnswerChange={onAnswerChange}
+                  onQuestionFocus={setCurrentQuestion}
+                  fontSize={fontSize}
+                  renderRichText={renderRichText}
+                  questionRange={questionRange}
+                />
+              </div>
             ) : (group.question_type === 'FILL_IN_BLANK' && group.options?.display_mode === 'note_style') || group.question_type === 'NOTE_COMPLETION' ? (
               /* Note-style Fill-in-Blank - Official IELTS format with category labels on left */
               <NoteStyleFillInBlank

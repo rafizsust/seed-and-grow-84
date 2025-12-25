@@ -161,11 +161,86 @@ Make it look like a professional test map with clear pathways and building outli
   }
 }
 
+// Generate flowchart image using Lovable AI Gateway
+async function generateFlowchartImage(
+  title: string, 
+  steps: Array<{label?: string; text?: string; isBlank?: boolean; questionNumber?: number}>
+): Promise<string | null> {
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  if (!LOVABLE_API_KEY) {
+    console.error('LOVABLE_API_KEY not configured');
+    return null;
+  }
+
+  try {
+    console.log('Generating flowchart image with Lovable AI...');
+    
+    // Build step descriptions for the prompt
+    const stepDescriptions = steps.map((step, idx) => {
+      const stepText = step.label || step.text || '';
+      if (step.isBlank) {
+        return `Step ${idx + 1}: [BLANK ${step.questionNumber || idx + 1}] (empty box for answer)`;
+      }
+      return `Step ${idx + 1}: ${stepText}`;
+    }).join('\n');
+    
+    const imagePrompt = `Create a clean, professional flowchart diagram for an IELTS listening test.
+Title: ${title || 'Process Flowchart'}
+The flowchart has the following steps connected by arrows flowing downward:
+${stepDescriptions}
+
+Style requirements:
+- Vertical flow from top to bottom
+- Each step in a rounded rectangle box
+- Clear arrows connecting steps
+- Blank steps should show an empty box with a question number
+- Clean, educational diagram style
+- Easy to read text
+- Professional appearance suitable for a test`;
+
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-image-preview',
+        messages: [
+          { role: 'user', content: imagePrompt }
+        ],
+        modalities: ['image', 'text'],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Flowchart image generation failed:', response.status, errorText);
+      return null;
+    }
+
+    const data = await response.json();
+    const imageData = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    
+    if (imageData && imageData.startsWith('data:image/')) {
+      console.log('Flowchart image generated successfully');
+      return imageData;
+    }
+    
+    console.error('No image data in flowchart response');
+    return null;
+  } catch (err) {
+    console.error('Flowchart image generation error:', err);
+    return null;
+  }
+}
+
 // Upload base64 image to Supabase storage and return public URL
-async function uploadMapImage(
+async function uploadGeneratedImage(
   supabaseClient: any, 
   imageDataUrl: string, 
-  testId: string
+  testId: string,
+  folder: string = 'ai-practice-images'
 ): Promise<string | null> {
   try {
     // Extract base64 data and mime type
@@ -178,7 +253,7 @@ async function uploadMapImage(
     const [, extension, base64Data] = matches;
     const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
     
-    const fileName = `ai-practice-maps/${testId}-${Date.now()}.${extension}`;
+    const fileName = `${folder}/${testId}-${Date.now()}.${extension}`;
     
     const { data, error } = await supabaseClient.storage
       .from('listening-images')
@@ -1031,11 +1106,27 @@ serve(async (req) => {
         const correctAnswers = parsed.questions?.map((q: any) => q.correct_answer) || [];
         const distractors = ['Other option', 'Alternative choice']; // fallback distractors
         const flowchartOptions = [...new Set([...correctAnswers, ...distractors])];
+        
+        // Generate flowchart image using Lovable AI
+        let flowchartImageUrl: string | undefined;
+        console.log('Generating flowchart image for FLOWCHART_COMPLETION...');
+        const flowchartImageData = await generateFlowchartImage(
+          parsed.flowchart_title || 'Process Flowchart',
+          parsed.flowchart_steps
+        );
+        if (flowchartImageData) {
+          const uploadedUrl = await uploadGeneratedImage(supabaseClient, flowchartImageData, testId, 'ai-practice-flowcharts');
+          if (uploadedUrl) {
+            flowchartImageUrl = uploadedUrl;
+          }
+        }
+        
         groupOptions = {
           title: parsed.flowchart_title,
           steps,
           options: flowchartOptions,
           option_format: 'A',
+          imageUrl: flowchartImageUrl,
         };
       } else if (questionType === 'DRAG_AND_DROP_OPTIONS') {
         // UI expects group.options.options (array of strings) + option_format
@@ -1047,7 +1138,7 @@ serve(async (req) => {
           console.log('Generating map image for MAP_LABELING...');
           const mapImageData = await generateMapImage(parsed.map_description, parsed.map_labels);
           if (mapImageData) {
-            const uploadedUrl = await uploadMapImage(supabaseClient, mapImageData, testId);
+            const uploadedUrl = await uploadGeneratedImage(supabaseClient, mapImageData, testId, 'ai-practice-maps');
             if (uploadedUrl) {
               mapImageUrl = uploadedUrl;
             }
