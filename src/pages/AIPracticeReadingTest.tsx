@@ -69,6 +69,11 @@ export default function AIPracticeReadingTest() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [questionGroups, setQuestionGroups] = useState<QuestionGroup[]>([]);
   const [answers, setAnswers] = useState<Record<number, string>>({});
+
+  // Matching headings state (needed for drag/drop UI)
+  const [headingAnswers, setHeadingAnswers] = useState<Record<string, string>>({}); // paragraphLabel -> headingId
+  const [selectedHeading, setSelectedHeading] = useState<string | null>(null);
+  
   const [currentQuestion, setCurrentQuestion] = useState(1);
   const [currentPassageIndex, setCurrentPassageIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -174,6 +179,111 @@ export default function AIPracticeReadingTest() {
   const currentPassageQuestions = currentPassage
     ? questions.filter(q => q.passage_id === currentPassage.id)
     : questions;
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Matching Headings (AI practice) - replicate standard ReadingTest wiring
+  // ───────────────────────────────────────────────────────────────────────────
+  const matchingHeadingsQuestions = useMemo(
+    () => currentPassageQuestions.filter(q => q.question_type === 'MATCHING_HEADINGS'),
+    [currentPassageQuestions]
+  );
+
+  const hasMatchingHeadings = matchingHeadingsQuestions.length > 0;
+
+  const toRomanNumeral = (num: number) => {
+    const roman: Record<number, string> = {
+      1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 6: 'VI', 7: 'VII', 8: 'VIII', 9: 'IX', 10: 'X',
+      11: 'XI', 12: 'XII', 13: 'XIII', 14: 'XIV', 15: 'XV',
+    };
+    return roman[num] || String(num);
+  };
+
+  const headingParagraphLabels = useMemo(
+    () => matchingHeadingsQuestions.map(q => q.question_text),
+    [matchingHeadingsQuestions]
+  );
+
+  const headingOptions = useMemo(() => {
+    if (!hasMatchingHeadings) return [];
+
+    const matchingGroup = questionGroups.find(
+      (g) =>
+        g.question_type === 'MATCHING_HEADINGS' &&
+        matchingHeadingsQuestions.some((q) => q.question_group_id === g.id)
+    );
+
+    const raw = (matchingGroup?.options || {}) as any;
+    const headingsList: any[] = Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw?.headings)
+        ? raw.headings
+        : Array.isArray(raw?.options)
+          ? raw.options
+          : [];
+
+    return headingsList.map((opt: any, idx: number) => {
+      if (typeof opt === 'string') return { id: toRomanNumeral(idx + 1), text: opt };
+      const id = typeof opt?.id === 'string' ? opt.id : toRomanNumeral(idx + 1);
+      const text = typeof opt?.text === 'string' ? opt.text : typeof opt?.label === 'string' ? opt.label : String(opt ?? '');
+      return { id, text };
+    });
+  }, [hasMatchingHeadings, matchingHeadingsQuestions, questionGroups]);
+
+  const headingQuestionNumbers = useMemo(() => {
+    if (!hasMatchingHeadings) return {} as Record<string, number>;
+
+    const matchingGroup = questionGroups.find(
+      (g) =>
+        g.question_type === 'MATCHING_HEADINGS' &&
+        matchingHeadingsQuestions.some((q) => q.question_group_id === g.id)
+    );
+
+    const startQuestion = matchingGroup?.start_question ?? 1;
+    const mapping: Record<string, number> = {};
+    headingParagraphLabels.forEach((label, index) => {
+      mapping[label] = startQuestion + index;
+    });
+    return mapping;
+  }, [hasMatchingHeadings, headingParagraphLabels, matchingHeadingsQuestions, questionGroups]);
+
+  const handleHeadingDrop = useCallback((paragraphLabel: string, headingId: string) => {
+    setHeadingAnswers(prev => {
+      const next = { ...prev };
+      Object.keys(next).forEach((k) => {
+        if (next[k] === headingId) delete next[k];
+      });
+      next[paragraphLabel] = headingId;
+      return next;
+    });
+
+    const matchingQ = matchingHeadingsQuestions.find(q => q.question_text === paragraphLabel);
+    if (matchingQ) setAnswers(prev => ({ ...prev, [matchingQ.question_number]: headingId }));
+  }, [matchingHeadingsQuestions]);
+
+  const handleHeadingRemove = useCallback((paragraphLabel: string) => {
+    setHeadingAnswers(prev => {
+      const next = { ...prev };
+      delete next[paragraphLabel];
+      return next;
+    });
+
+    const matchingQ = matchingHeadingsQuestions.find(q => q.question_text === paragraphLabel);
+    if (matchingQ) setAnswers(prev => ({ ...prev, [matchingQ.question_number]: '' }));
+  }, [matchingHeadingsQuestions]);
+
+  const handleSelectPlace = useCallback((paragraphLabel: string) => {
+    if (!selectedHeading) return;
+    handleHeadingDrop(paragraphLabel, selectedHeading);
+    setSelectedHeading(null);
+  }, [handleHeadingDrop, selectedHeading]);
+
+  const handleHeadingAnswerChange = useCallback((paragraphLabel: string, headingId: string | null) => {
+    if (!headingId) {
+      handleHeadingRemove(paragraphLabel);
+      return;
+    }
+    handleHeadingDrop(paragraphLabel, headingId);
+  }, [handleHeadingDrop, handleHeadingRemove]);
 
   const handleAnswerChange = (questionNumber: number, answer: string) => {
     setAnswers(prev => ({ ...prev, [questionNumber]: answer }));
@@ -295,6 +405,25 @@ export default function AIPracticeReadingTest() {
       return group.options.max_answers;
     }
     return 2;
+  }, [questionGroups]);
+
+  const getMatchingSentenceEndingsGroupOptions = useCallback((questionGroupId: string | null): string[] => {
+    if (!questionGroupId) return [];
+    const group = questionGroups.find(g => g.id === questionGroupId);
+    const raw = (group?.options || {}) as any;
+    if (Array.isArray(group?.options)) return group.options as any;
+    if (Array.isArray(raw?.sentence_endings)) return raw.sentence_endings as string[];
+    if (Array.isArray(raw?.options)) return raw.options as string[];
+    return [];
+  }, [questionGroups]);
+
+  const getTableSelectionOptions = useCallback((questionGroupId: string | null): string[] => {
+    if (!questionGroupId) return [];
+    const group = questionGroups.find(g => g.id === questionGroupId);
+    if (!group?.options) return [];
+    if (Array.isArray(group.options)) return group.options as any;
+    if (Array.isArray((group.options as any).options)) return (group.options as any).options as string[];
+    return [];
   }, [questionGroups]);
 
   // Get question range for display
@@ -448,15 +577,15 @@ export default function AIPracticeReadingTest() {
                           testId={testId!}
                           passage={currentPassage} 
                           fontSize={fontSize}
-                          hasMatchingHeadings={false}
-                          headingOptions={[]}
-                          headingAnswers={{}}
-                          headingQuestionNumbers={{}}
-                          onHeadingDrop={() => {}}
-                          onHeadingRemove={() => {}}
+                          hasMatchingHeadings={hasMatchingHeadings}
+                          headingOptions={headingOptions}
+                          headingAnswers={headingAnswers}
+                          headingQuestionNumbers={headingQuestionNumbers}
+                          onHeadingDrop={handleHeadingDrop}
+                          onHeadingRemove={handleHeadingRemove}
                           renderRichText={renderRichText}
-                          selectedHeading={null}
-                          onSelectPlace={() => {}}
+                          selectedHeading={selectedHeading}
+                          onSelectPlace={handleSelectPlace}
                           showLabels={false}
                           onQuestionFocus={setCurrentQuestion}
                         />
@@ -495,6 +624,14 @@ export default function AIPracticeReadingTest() {
                         renderRichText={renderRichText}
                         getMaxAnswers={getMaxAnswers}
                         getQuestionGroupOptions={getQuestionGroupOptions}
+                        getMatchingSentenceEndingsGroupOptions={getMatchingSentenceEndingsGroupOptions}
+                        getTableSelectionOptions={getTableSelectionOptions}
+                        headingOptions={headingOptions}
+                        headingAnswers={headingAnswers}
+                        paragraphLabels={headingParagraphLabels}
+                        onHeadingAnswerChange={handleHeadingAnswerChange}
+                        selectedHeading={selectedHeading}
+                        onSelectedHeadingChange={setSelectedHeading}
                       />
                     </div>
                     

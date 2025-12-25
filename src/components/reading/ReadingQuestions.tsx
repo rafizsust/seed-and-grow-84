@@ -708,15 +708,17 @@ export function ReadingQuestions({
                     const groupData = getQuestionGroupOptions 
                       ? getQuestionGroupOptions(firstQuestionInGroup.question_group_id || null)
                       : null;
-                    const title = groupData?.title || '';
-                    const content = groupData?.content || '';
-                    const wordBank = groupData?.wordBank || [];
+
+                    const opts = (groupData?.options || {}) as any;
+                    const title = opts?.title || opts?.summary_title || '';
+                    const content = opts?.content || opts?.summary_text || '';
+                    const wordBank = opts?.wordBank || opts?.word_bank || [];
                     
                     return (
                       <SummaryWordBank
                         title={title}
                         content={content}
-                        wordBank={wordBank}
+                        wordBank={Array.isArray(wordBank) ? wordBank : []}
                         answers={answers}
                         onAnswerChange={onAnswerChange}
                         onQuestionFocus={setCurrentQuestion}
@@ -731,14 +733,26 @@ export function ReadingQuestions({
                     const groupData = getQuestionGroupOptions 
                       ? getQuestionGroupOptions(firstQuestionInGroup.question_group_id || null)
                       : null;
-                    const title = groupData?.title || '';
-                    const steps = groupData?.steps || typeQuestions.map((q) => ({
-                      id: q.id,
-                      label: q.question_text,
-                      questionNumber: q.question_number,
-                      isBlank: true,
-                    }));
-                    const direction = groupData?.direction || 'vertical';
+
+                    const opts = (groupData?.options || {}) as any;
+                    const title = opts?.title || opts?.flowchart_title || '';
+
+                    const rawSteps = opts?.steps || opts?.flowchart_steps;
+                    const steps = Array.isArray(rawSteps)
+                      ? rawSteps.map((s: any, idx: number) => ({
+                          id: String(s?.id ?? `step-${idx + 1}`),
+                          label: String(s?.label ?? s?.text ?? ''),
+                          questionNumber: typeof s?.questionNumber === 'number' ? s.questionNumber : undefined,
+                          isBlank: !!s?.isBlank,
+                        }))
+                      : typeQuestions.map((q) => ({
+                          id: q.id,
+                          label: q.question_text,
+                          questionNumber: q.question_number,
+                          isBlank: true,
+                        }));
+
+                    const direction = opts?.direction || 'vertical';
                     
                     return (
                       <FlowchartCompletion
@@ -758,13 +772,37 @@ export function ReadingQuestions({
                     const groupData = getQuestionGroupOptions 
                       ? getQuestionGroupOptions(firstQuestionInGroup.question_group_id || null)
                       : null;
-                    const groupOptions = groupData?.options || {};
-                    const imageUrl = groupOptions?.imageUrl || '';
-                    const dropZones = groupOptions?.dropZones || [];
-                    const optionsList = groupOptions?.options || [];
+
+                    const groupOptions = (groupData?.options || {}) as any;
+
+                    const imageUrl = groupOptions?.imageUrl || groupOptions?.image_url || '';
+
+                    // Preferred format
+                    let dropZones = Array.isArray(groupOptions?.dropZones) ? groupOptions.dropZones : [];
+                    let optionsList = Array.isArray(groupOptions?.options) ? groupOptions.options : [];
+
+                    // Back-compat for AI practice payloads
+                    if (dropZones.length === 0 && Array.isArray(groupOptions?.map_labels)) {
+                      // Create deterministic placeholder drop zones (until generator provides real coordinates)
+                      const startX = 22;
+                      const startY = 18;
+                      const colGap = 30;
+                      const rowGap = 16;
+                      dropZones = typeQuestions.map((q, idx) => ({
+                        questionNumber: q.question_number,
+                        xPercent: startX + (idx % 2) * colGap,
+                        yPercent: startY + Math.floor(idx / 2) * rowGap,
+                      }));
+
+                      // Default options are label letters (A, B, C...)
+                      optionsList = groupOptions.map_labels
+                        .map((l: any) => String(l?.id ?? l))
+                        .filter(Boolean);
+                    }
+
                     const maxImageWidth = groupOptions?.maxImageWidth || null;
                     const maxImageHeight = groupOptions?.maxImageHeight || null;
-                    
+
                     return (
                       <MapLabeling
                         imageUrl={imageUrl}
