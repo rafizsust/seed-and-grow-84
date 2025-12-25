@@ -682,19 +682,49 @@ Return ONLY valid JSON in this exact format:
   ]
 }`;
 
+    case 'NOTE_COMPLETION':
+      return basePrompt + `2. Create a note completion task with ${questionCount} blanks organized in categories.
+
+Return ONLY valid JSON in this exact format:
+{
+  "dialogue": "Speaker1: Let me explain the key points...\\nSpeaker2: Please go ahead...",
+  "instruction": "Complete the notes below. Write NO MORE THAN TWO WORDS for each answer.",
+  "note_sections": [
+    {
+      "title": "Main Topic",
+      "items": [
+        {"text_before": "The primary focus is on", "question_number": 1, "text_after": ""},
+        {"text_before": "This relates to", "question_number": 2, "text_after": "in modern contexts"}
+      ]
+    },
+    {
+      "title": "Key Details",
+      "items": [
+        {"text_before": "The main benefit includes", "question_number": 3, "text_after": ""}
+      ]
+    }
+  ],
+  "questions": [
+    {"question_number": 1, "question_text": "Note 1", "correct_answer": "research methods", "explanation": "Speaker mentions research methods"},
+    {"question_number": 2, "question_text": "Note 2", "correct_answer": "practical applications", "explanation": "Related to practical use"},
+    {"question_number": 3, "question_text": "Note 3", "correct_answer": "cost savings", "explanation": "Benefits discussed"}
+  ]
+}`;
+
     default:
       return basePrompt + `2. Create ${questionCount} fill-in-the-blank questions.
+   - Each question MUST include a blank indicated by 2+ underscores (e.g., "_____") where the answer goes.
 
 Return ONLY valid JSON in this exact format:
 {
   "dialogue": "Speaker1: dialogue...\\nSpeaker2: response...",
-  "instruction": "Complete the notes below.",
+  "instruction": "Complete the notes below. Write NO MORE THAN TWO WORDS for each answer.",
   "questions": [
     {
       "question_number": 1,
-      "question_text": "Complete this: _____",
-      "correct_answer": "the answer",
-      "explanation": "Explanation here"
+      "question_text": "The event takes place in _____.",
+      "correct_answer": "the garden",
+      "explanation": "Speaker mentions the garden location"
     }
   ]
 }`;
@@ -899,6 +929,21 @@ serve(async (req) => {
         groupOptions = {
           map_description: parsed.map_description,
           map_labels: parsed.map_labels,
+        };
+      } else if (questionType === 'NOTE_COMPLETION' && parsed.note_sections) {
+        // Map note_sections to noteCategories format expected by NoteStyleFillInBlank
+        const noteCategories = parsed.note_sections.map((section: any) => ({
+          label: section.title,
+          items: (section.items || []).map((item: any) => ({
+            text: item.text_before || '',
+            hasBlank: true,
+            suffixText: item.text_after || '',
+            questionNumber: item.question_number,
+          })),
+        }));
+        groupOptions = { 
+          noteCategories, 
+          display_mode: 'note_style' 
         };
       } else if (questionType.includes('MULTIPLE_CHOICE') && parsed.questions?.[0]?.options) {
         groupOptions = { options: parsed.questions[0].options };

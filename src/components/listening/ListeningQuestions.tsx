@@ -307,9 +307,10 @@ export function ListeningQuestions({
             )}
 
             {/* Conditional rendering for Table Completion */}
-            {group.question_type === 'TABLE_COMPLETION' && groupQuestions.length > 0 && groupQuestions[0].table_data ? (
+            {group.question_type === 'TABLE_COMPLETION' && groupQuestions.length > 0 && (groupQuestions[0].table_data || group.options?.table_data) ? (
               (() => {
-                const rawTableData = groupQuestions[0].table_data;
+                // Check individual question table_data first, then fallback to group.options.table_data (AI practice)
+                const rawTableData = groupQuestions[0].table_data || group.options?.table_data;
                 // Handle both old array format and new object format
                 const tableRows = Array.isArray(rawTableData) ? rawTableData : rawTableData.rows;
                 const tableHeading = !Array.isArray(rawTableData) ? rawTableData.heading : undefined;
@@ -423,7 +424,7 @@ export function ListeningQuestions({
                 renderRichText={renderRichText}
                 questionRange={questionRange}
               />
-            ) : group.question_type === 'FILL_IN_BLANK' && group.options?.display_mode === 'note_style' ? (
+            ) : (group.question_type === 'FILL_IN_BLANK' && group.options?.display_mode === 'note_style') || group.question_type === 'NOTE_COMPLETION' ? (
               /* Note-style Fill-in-Blank - Official IELTS format with category labels on left */
               <NoteStyleFillInBlank
                 questions={groupQuestions}
