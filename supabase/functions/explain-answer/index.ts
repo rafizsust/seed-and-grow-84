@@ -59,6 +59,28 @@ serve(async (req) => {
     const testTypeLabel = testType === 'listening' ? 'IELTS Listening' : 'IELTS Reading';
     const questionTypeLabel = questionType ? ` (${questionType.replace(/_/g, ' ').toLowerCase()})` : '';
 
+    // Special handling for Multiple Choice Multiple Answers
+    const isMCQMultiple = questionType === 'MULTIPLE_CHOICE_MULTIPLE';
+    
+    let mcqMultipleGuidelines = '';
+    if (isMCQMultiple) {
+      const userAnswers: string[] = userAnswer ? userAnswer.split(',').map((a: string) => a.trim()) : [];
+      const correctAnswersArr: string[] = correctAnswer ? correctAnswer.split(',').map((a: string) => a.trim()) : [];
+      const correctOnes = userAnswers.filter((a: string) => correctAnswersArr.includes(a));
+      const wrongOnes = userAnswers.filter((a: string) => !correctAnswersArr.includes(a));
+      const missedOnes = correctAnswersArr.filter((a: string) => !userAnswers.includes(a));
+      
+      mcqMultipleGuidelines = `
+This is a MULTIPLE CHOICE MULTIPLE ANSWERS question where the student must select ${correctAnswersArr.length} correct answers.
+- Student selected: ${userAnswers.join(', ') || '(none)'}
+- Correct answers are: ${correctAnswersArr.join(', ')}
+- Correctly identified: ${correctOnes.join(', ') || '(none)'}
+- Incorrectly selected: ${wrongOnes.join(', ') || '(none)'}
+- Missed: ${missedOnes.join(', ') || '(none)'}
+
+IMPORTANT: Address each selection individually. Explain why the correct answers are right, and if the student selected any wrong options, explain why those are incorrect.`;
+    }
+
     const systemPrompt = `You are an expert ${testTypeLabel} tutor. Your task is to explain ${isCorrect ? 'why a student\'s answer was correct' : 'why a student\'s answer was incorrect'} in a helpful and educational way.
 
 Guidelines:
@@ -70,7 +92,8 @@ Guidelines:
 - Provide helpful tips for similar questions in the future
 - Be encouraging and supportive
 - Use simple, clear language
-- If the provided "correct answer" seems wrong or questionable, mention this and suggest the user report it to the admin`;
+- If the provided "correct answer" seems wrong or questionable, mention this and suggest the user report it to the admin
+${mcqMultipleGuidelines}`;
 
     const contextReference = testType === 'listening' 
       ? (transcriptContext ? 'Reference the specific part of the transcript where the answer can be found.' : '')

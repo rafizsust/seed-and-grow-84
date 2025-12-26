@@ -739,7 +739,7 @@ export function ReadingQuestions({
                       />
                     );
                   })()
-                ) : type === 'SUMMARY_WORD_BANK' ? (
+                ) : type === 'SUMMARY_WORD_BANK' || (type === 'SUMMARY_COMPLETION' && fillDisplay.wordBankWithText?.length > 0) ? (
                   /* Summary with Word Bank sidebar */
                   (() => {
                     const groupData = getQuestionGroupOptions 
@@ -749,13 +749,23 @@ export function ReadingQuestions({
                     const opts = (groupData?.options || {}) as any;
                     const title = opts?.title || opts?.summary_title || '';
                     const content = opts?.content || opts?.summary_text || '';
-                    const wordBank = opts?.wordBank || opts?.word_bank || [];
+                    
+                    // Word bank should be {id, text} objects for proper display
+                    let wordBank = opts?.wordBank || opts?.word_bank || [];
+                    // Ensure we pass objects with id and text
+                    if (Array.isArray(wordBank) && wordBank.length > 0 && typeof wordBank[0] === 'string') {
+                      // Legacy string format - convert to objects
+                      wordBank = wordBank.map((w: string, idx: number) => ({
+                        id: String.fromCharCode(65 + idx),
+                        text: w
+                      }));
+                    }
                     
                     return (
                       <SummaryWordBank
                         title={title}
                         content={content}
-                        wordBank={Array.isArray(wordBank) ? wordBank : []}
+                        wordBank={wordBank}
                         answers={answers}
                         onAnswerChange={onAnswerChange}
                         onQuestionFocus={setCurrentQuestion}
