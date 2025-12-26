@@ -42,6 +42,7 @@ interface Question {
   passage_id: string;
   question_group_id: string | null;
   heading?: string | null;
+  table_data?: any; // For TABLE_COMPLETION
 }
 
 interface Passage {
@@ -129,6 +130,9 @@ export default function AIPracticeReadingTest() {
         });
 
         group.questions.forEach((q) => {
+          // For TABLE_COMPLETION, get table_data from group options if not on question
+          const tableData = q.table_data || group.options?.table_data || null;
+          
           convertedQuestions.push({
             id: q.id,
             question_number: q.question_number,
@@ -140,6 +144,7 @@ export default function AIPracticeReadingTest() {
             passage_id: loadedTest.passage?.id || '',
             question_group_id: group.id,
             heading: q.heading || null,
+            table_data: tableData,
           });
         });
       });

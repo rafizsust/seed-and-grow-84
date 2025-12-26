@@ -99,6 +99,7 @@ export interface GeneratedQuestion {
   explanation: string;
   options?: string[]; // For MCQ
   heading?: string;
+  table_data?: any; // For TABLE_COMPLETION
 }
 
 // Generated question group
@@ -111,6 +112,8 @@ export interface GeneratedQuestionGroup {
   options?: {
     options?: string[];
     option_format?: string;
+    table_data?: any; // For TABLE_COMPLETION
+    [key: string]: any; // Allow other dynamic options
   };
   questions: GeneratedQuestion[];
 }

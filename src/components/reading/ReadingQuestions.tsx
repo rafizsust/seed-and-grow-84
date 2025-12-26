@@ -383,9 +383,10 @@ export function ReadingQuestions({
             };
             
             const fillDisplay = {
-              displayAsParagraph: !!groupMeta?.display_as_paragraph,
-              showBullets: !!groupMeta?.show_bullets,
-              showHeadings: !!groupMeta?.show_headings,
+              // Check both DB format (groupMeta.field) and AI-generated format (groupOptions.field)
+              displayAsParagraph: !!groupMeta?.display_as_paragraph || !!groupOptions?.display_as_paragraph,
+              showBullets: !!groupMeta?.show_bullets || !!groupOptions?.show_bullets,
+              showHeadings: !!groupMeta?.show_headings || !!groupOptions?.show_headings,
               groupTitle: groupOptions?.group_title || '',
               titleCentered: !!groupOptions?.title_centered,
               titleColored: !!groupOptions?.title_colored,
@@ -394,6 +395,7 @@ export function ReadingQuestions({
               wordBankWithText: Array.isArray(groupOptions?.word_bank) ? groupOptions.word_bank : [], // For displaying with text
               noteStyleEnabled: !!groupOptions?.note_style_enabled,
               noteCategories: groupOptions?.note_categories || [],
+              paragraphText: groupOptions?.paragraph_text || '', // For paragraph display mode
             };
 
 
@@ -844,7 +846,8 @@ export function ReadingQuestions({
                   /* Table Completion - Official IELTS Style */
                   (() => {
                     // Get table data from the first question in the group (stored on question record)
-                    const tableDataRaw = firstQuestionInGroup.table_data;
+                    // Also check groupOptions for AI-generated tests where table_data is in group.options
+                    const tableDataRaw = firstQuestionInGroup.table_data || groupOptions?.table_data;
                     let tableData: any[] = [];
                     let tableHeading = '';
                     let tableHeadingAlignment: 'left' | 'center' | 'right' = 'left';

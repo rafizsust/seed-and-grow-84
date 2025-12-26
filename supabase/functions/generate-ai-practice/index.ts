@@ -250,6 +250,13 @@ Style requirements:
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Flowchart image generation failed:', response.status, errorText);
+      
+      // Log specific error types for debugging
+      if (response.status === 429) {
+        console.error('Rate limit exceeded for image generation');
+      } else if (response.status === 402) {
+        console.error('Payment required for image generation');
+      }
       return null;
     }
 
@@ -571,8 +578,64 @@ Return ONLY valid JSON in this exact format:
 
     case 'FILL_IN_BLANK':
     case 'SHORT_ANSWER':
+      // Randomly select a display variation for fill-in-the-blank questions
+      // Variations: standard, paragraph, bullets, headings, note_style
+      const fillVariations = ['standard', 'paragraph', 'bullets', 'headings', 'note_style'];
+      const selectedVariation = fillVariations[Math.floor(Math.random() * fillVariations.length)];
+      
+      let variationInstructions = '';
+      let variationFormat = '';
+      
+      if (selectedVariation === 'paragraph') {
+        variationInstructions = `
+   - Format the questions as a flowing paragraph with blanks numbered in parentheses
+   - The paragraph should be a coherent summary of part of the passage`;
+        variationFormat = `
+  "display_options": {
+    "display_as_paragraph": true,
+    "paragraph_text": "The study found that (1) _____ was the primary factor, which led to (2) _____ in the region. Researchers concluded that (3) _____ would be necessary..."
+  },`;
+      } else if (selectedVariation === 'bullets') {
+        variationInstructions = `
+   - Format each question as a bullet point item`;
+        variationFormat = `
+  "display_options": {
+    "show_bullets": true
+  },`;
+      } else if (selectedVariation === 'headings') {
+        variationInstructions = `
+   - Group questions under 2-3 thematic headings based on the passage content
+   - Each question should have a "heading" field indicating which heading it belongs to`;
+        variationFormat = `
+  "display_options": {
+    "show_headings": true,
+    "group_title": "Summary of Key Points"
+  },`;
+      } else if (selectedVariation === 'note_style') {
+        variationInstructions = `
+   - Format as note-taking style with categories
+   - Group questions into 2-3 note categories
+   - Each category has a title and list of items with blanks`;
+        variationFormat = `
+  "display_options": {
+    "note_style_enabled": true,
+    "note_categories": [
+      {
+        "title": "Main Findings",
+        "items": [
+          {"text_before": "Primary cause:", "question_number": 1, "text_after": ""},
+          {"text_before": "Effect on population:", "question_number": 2, "text_after": ""}
+        ]
+      }
+    ]
+  },`;
+      } else {
+        variationFormat = `
+  "display_options": {},`;
+      }
+      
       return basePrompt + `2. Create ${questionCount} fill-in-the-blank/sentence completion questions.
-   - Answers should be words or short phrases from the passage (1-3 words)
+   - Answers should be words or short phrases from the passage (1-3 words)${variationInstructions}
 
 Return ONLY valid JSON in this exact format:
 {
@@ -580,13 +643,13 @@ Return ONLY valid JSON in this exact format:
     "title": "The title of the passage",
     "content": "The full passage text with paragraph labels like [A], [B], etc."
   },
-  "instruction": "Complete the sentences below. Choose NO MORE THAN THREE WORDS from the passage for each answer.",
+  "instruction": "Complete the sentences below. Choose NO MORE THAN THREE WORDS from the passage for each answer.",${variationFormat}
   "questions": [
     {
       "question_number": 1,
       "question_text": "According to the passage, the main cause of _____ is pollution.",
       "correct_answer": "climate change",
-      "explanation": "Found in paragraph A: 'the main cause of climate change is pollution'"
+      "explanation": "Found in paragraph A: 'the main cause of climate change is pollution'"${selectedVariation === 'headings' ? ',\n      "heading": "Environmental Impact"' : ''}
     }
   ]
 }`;
@@ -1214,6 +1277,12 @@ serve(async (req) => {
         };
       } else if (questionType.includes('MULTIPLE_CHOICE') && parsed.questions?.[0]?.options) {
         groupOptions = { options: parsed.questions[0].options };
+      } else if ((questionType === 'FILL_IN_BLANK' || questionType === 'SHORT_ANSWER') && parsed.display_options) {
+        // Handle fill-in-blank display variations
+        groupOptions = {
+          ...parsed.display_options,
+          paragraph_text: parsed.display_options?.paragraph_text,
+        };
       }
 
       const questions = (parsed.questions || []).map((q: any, i: number) => ({
