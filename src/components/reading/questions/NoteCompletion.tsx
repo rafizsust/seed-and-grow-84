@@ -72,18 +72,24 @@ export function NoteCompletion({
                         <input
                           value={answer}
                           onChange={(e) => onAnswerChange(item.question_number, e.target.value)}
-                          placeholder={String(item.question_number)}
+                          aria-label={`Answer for question ${item.question_number}`}
                           className={cn(
                             "h-7 text-sm font-normal pl-7 pr-2 min-w-[174px] max-w-full rounded-[3px]",
                             "bg-[hsl(var(--ielts-input-bg,0_0%_100%))] border border-[hsl(var(--ielts-input-border))] text-foreground",
                             "focus:outline-none focus:border-[hsl(var(--ielts-input-focus))] focus:ring-0",
-                            "transition-colors placeholder:font-bold placeholder:text-foreground/70",
+                            "transition-colors",
                             isActive && "border-[hsl(var(--ielts-input-focus))]"
                           )}
                         />
-                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm font-bold text-foreground pointer-events-none">
-                          {item.question_number}
-                        </span>
+                        {answer ? (
+                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm font-bold text-foreground pointer-events-none">
+                            {item.question_number}
+                          </span>
+                        ) : (
+                          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-sm font-bold text-foreground/70 pointer-events-none">
+                            {item.question_number}
+                          </span>
+                        )}
                       </span>
                     </div>
                     {item.text_after && <span>{item.text_after}</span>}

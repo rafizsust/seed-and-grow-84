@@ -599,6 +599,14 @@ export default function AIPracticeResults() {
 
           {/* Actions */}
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Button
+              variant="default"
+              className="w-full sm:w-auto gap-2"
+              onClick={() => navigate(`/ai-practice/${test.module}/${test.id}`)}
+            >
+              <RotateCcw className="w-4 h-4" />
+              Retake this test
+            </Button>
             <Link to="/ai-practice">
               <Button variant="outline" className="w-full sm:w-auto gap-2">
                 <RotateCcw className="w-4 h-4" />

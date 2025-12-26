@@ -1,11 +1,16 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
+interface WordBankItem {
+  id: string; // A, B, C...
+  text: string;
+}
+
 interface SummaryWordBankProps {
   title?: string;
   // Content with gaps marked as {{31}}, {{32}}, etc.
   content: string;
-  wordBank: string[];
+  wordBank: Array<string | WordBankItem>;
   answers: Record<number, string>;
   onAnswerChange: (questionNumber: number, answer: string) => void;
   onQuestionFocus?: (questionNumber: number) => void;
@@ -50,8 +55,17 @@ export function SummaryWordBank({
     return parts;
   };
 
-  const handleDragStart = (word: string) => {
-    setDraggedWord(word);
+  const normalizeWordBankItem = (item: string | WordBankItem) => {
+    if (typeof item === 'string') {
+      // Back-compat: treat string as both id and text
+      return { id: item, text: item };
+    }
+    return { id: item.id, text: item.text };
+  };
+
+  const handleDragStart = (item: string | WordBankItem) => {
+    const wb = normalizeWordBankItem(item);
+    setDraggedWord(wb.id);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -71,18 +85,17 @@ export function SummaryWordBank({
     onAnswerChange(questionNumber, '');
   };
 
-  const handleWordClick = (word: string) => {
+  const handleWordClick = (item: string | WordBankItem) => {
+    const wb = normalizeWordBankItem(item);
     // Find first empty gap or current question
     const allGaps = parseContent().filter(p => p.type === 'gap');
     const firstEmptyGap = allGaps.find(g => !answers[g.questionNumber!]);
-    
+
     if (currentQuestion && !answers[currentQuestion]) {
-      onAnswerChange(currentQuestion, word);
-      // Focus the question in navigation after click
+      onAnswerChange(currentQuestion, wb.id);
       onQuestionFocus?.(currentQuestion);
     } else if (firstEmptyGap) {
-      onAnswerChange(firstEmptyGap.questionNumber!, word);
-      // Focus the question in navigation after click
+      onAnswerChange(firstEmptyGap.questionNumber!, wb.id);
       onQuestionFocus?.(firstEmptyGap.questionNumber!);
     }
   };
@@ -152,15 +165,16 @@ export function SummaryWordBank({
       {/* Word Bank Sidebar */}
       <div className="w-44 flex-shrink-0">
         <div className="sticky top-4 space-y-1">
-          {wordBank.map((word, index) => {
-            const isUsed = usedWords.includes(word);
+          {wordBank.map((item, index) => {
+            const wb = normalizeWordBankItem(item);
+            const isUsed = usedWords.includes(wb.id);
 
             return (
               <div
-                key={index}
+                key={`${wb.id}-${index}`}
                 draggable={!isUsed}
-                onDragStart={() => handleDragStart(word)}
-                onClick={() => !isUsed && handleWordClick(word)}
+                onDragStart={() => handleDragStart(item)}
+                onClick={() => !isUsed && handleWordClick(item)}
                 className={cn(
                   "px-2 py-1.5 border rounded text-center cursor-pointer transition-all text-sm",
                   isUsed
@@ -168,7 +182,8 @@ export function SummaryWordBank({
                     : "bg-background hover:border-primary hover:bg-primary/5 active:bg-primary/10"
                 )}
               >
-                {word}
+                <span className="font-bold mr-1">{wb.id}</span>
+                <span>{wb.text}</span>
               </div>
             );
           })}
