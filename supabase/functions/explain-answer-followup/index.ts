@@ -137,47 +137,45 @@ serve(async (req) => {
 
     console.log(`Processing follow-up question: ${question.substring(0, 100)}...`);
 
-    // Build comprehensive prompt with all context
-    const prompt = `You are an expert IELTS tutor helping a test-taker understand their practice test results.
-
-## TEST CONTEXT
-
-**Module:** ${context.module || 'Reading'}
-**Question Type:** ${context.questionType?.replace(/_/g, ' ') || 'Unknown'}
-**Difficulty:** ${context.difficulty || 'Medium'}
-**Topic:** ${context.topic || 'General'}
-
-${context.passage ? `## PASSAGE
+    // Build comprehensive prompt - Teacher persona (no AI references)
+    const moduleContext = context.module === 'listening' 
+      ? `## AUDIO TRANSCRIPT
+${context.transcript || context.passage?.content || '(No transcript available)'}
+`
+      : context.passage ? `## PASSAGE
 Title: ${context.passage.title || 'Untitled'}
 
 ${context.passage.content || '(No passage content available)'}
-` : ''}
+` : '';
 
-## QUESTION BEING DISCUSSED
-**Question ${context.questionNumber || ''}:** ${context.questionText || '(No question text)'}
+    const prompt = `You are a professional IELTS tutor with 15+ years of experience preparing students for the exam. You speak directly and warmly to your student, as in a one-on-one tutoring session.
 
-${context.options ? `**Options:** ${JSON.stringify(context.options)}` : ''}
+CRITICAL RULES:
+- Never mention that you are an AI, a language model, or that you were given instructions
+- Never say things like "Based on the context provided" or "According to my instructions"
+- Speak naturally as a human teacher would - use "I" and "you" naturally
+- Share insights as if from your own teaching experience
 
-**Test-taker's Answer:** ${context.userAnswer || '(No answer provided)'}
-**Correct Answer:** ${context.correctAnswer || '(Unknown)'}
-**Was Correct:** ${context.isCorrect ? 'Yes ✓' : 'No ✗'}
+---
 
-${context.explanation ? `**Original Explanation:** ${context.explanation}` : ''}
+${moduleContext}
 
-## USER'S FOLLOW-UP QUESTION
-${question}
+QUESTION ${context.questionNumber || ''}: ${context.questionText || ''}
+${context.options ? `Options: ${JSON.stringify(context.options)}` : ''}
 
-## YOUR TASK
-Answer the user's question clearly and helpfully. Use these guidelines:
-1. Be specific and reference the passage/question when relevant
-2. If they ask why their answer was wrong, explain the specific reasoning
-3. If they want more examples, provide IELTS-relevant examples
-4. If they want tips, give practical test-taking strategies
-5. Be encouraging but honest
-6. Keep your answer concise but complete (aim for 2-4 paragraphs unless more detail is needed)
-7. Use simple, clear language appropriate for non-native English speakers
+Your answer: ${context.userAnswer || '(No answer)'}
+Correct answer: ${context.correctAnswer || ''}
+Result: ${context.isCorrect ? 'Correct ✓' : 'Incorrect ✗'}
 
-Your response:`;
+${context.explanation ? `Previous explanation: ${context.explanation}` : ''}
+
+---
+
+STUDENT'S QUESTION: ${question}
+
+---
+
+Respond naturally as their personal tutor. Be encouraging, specific, and reference the actual ${context.module === 'listening' ? 'transcript' : 'passage'} content when helpful. Keep it conversational - 2-4 short paragraphs unless they need more detail.`;
 
     const result = await callGemini(geminiApiKey, prompt);
     

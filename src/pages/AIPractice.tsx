@@ -98,6 +98,19 @@ const READING_PASSAGE_PRESETS = {
   custom: { paragraphs: 0, wordCount: 0, label: 'Custom' },
 };
 
+// Listening configuration - Gemini free tier limits:
+// - Audio TTS uses ~150 bytes per character for MP3
+// - Free tier: ~15 minutes of audio generation per day
+// - Keep requests to 70% capacity = ~2 minutes of audio max per request
+// - ~150 words per minute of speech at normal pace
+// - Max ~300 words of transcript per request to stay safe
+const LISTENING_TRANSCRIPT_PRESETS = {
+  brief: { durationSeconds: 60, wordCount: 150, label: 'Brief (1 min, ~150 words)' },
+  standard: { durationSeconds: 90, wordCount: 225, label: 'Standard (1.5 min, ~225 words)' },
+  extended: { durationSeconds: 120, wordCount: 300, label: 'Extended (2 min, ~300 words)' },
+  custom: { durationSeconds: 0, wordCount: 0, label: 'Custom' },
+};
+
 export default function AIPractice() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -121,6 +134,13 @@ export default function AIPractice() {
   const [useWordCountMode, setUseWordCountMode] = useState(false); // false = paragraph mode, true = word count mode
   const [customQuestionCount, setCustomQuestionCount] = useState(5);
 
+  // Listening-specific configuration
+  const [listeningTranscriptPreset, setListeningTranscriptPreset] = useState<keyof typeof LISTENING_TRANSCRIPT_PRESETS>('standard');
+  const [customTranscriptDuration, setCustomTranscriptDuration] = useState(90);
+  const [customTranscriptWordCount, setCustomTranscriptWordCount] = useState(225);
+  const [listeningUseWordCountMode, setListeningUseWordCountMode] = useState(false);
+  const [listeningQuestionCount, setListeningQuestionCount] = useState(5);
+
   // Loading state
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationStep, setGenerationStep] = useState(0);
@@ -130,9 +150,11 @@ export default function AIPractice() {
     : activeModule === 'writing' ? writingTaskType
     : speakingPartType;
   
-  // For reading, use custom question count; for others, use predefined counts
+  // For reading and listening, use custom question count; for others, use predefined counts
   const questionCount = activeModule === 'reading' 
     ? customQuestionCount 
+    : activeModule === 'listening'
+    ? listeningQuestionCount
     : (QUESTION_COUNTS[currentQuestionType] || 5);
 
   const progressSteps = activeModule === 'reading' 
@@ -178,6 +200,18 @@ export default function AIPractice() {
         useWordCountMode: readingPassagePreset === 'custom' ? useWordCountMode : false,
       } : undefined;
 
+      // Build listening-specific configuration
+      const listeningConfig = activeModule === 'listening' ? {
+        transcriptPreset: listeningTranscriptPreset,
+        durationSeconds: listeningTranscriptPreset === 'custom'
+          ? (listeningUseWordCountMode ? undefined : customTranscriptDuration)
+          : LISTENING_TRANSCRIPT_PRESETS[listeningTranscriptPreset].durationSeconds,
+        wordCount: listeningTranscriptPreset === 'custom'
+          ? (listeningUseWordCountMode ? customTranscriptWordCount : undefined)
+          : LISTENING_TRANSCRIPT_PRESETS[listeningTranscriptPreset].wordCount,
+        useWordCountMode: listeningTranscriptPreset === 'custom' ? listeningUseWordCountMode : false,
+      } : undefined;
+
       const { data, error } = await supabase.functions.invoke('generate-ai-practice', {
         body: {
           module: activeModule,
@@ -187,6 +221,7 @@ export default function AIPractice() {
           questionCount,
           timeMinutes,
           readingConfig,
+          listeningConfig,
         },
       });
 
@@ -495,7 +530,7 @@ export default function AIPractice() {
                     Listening Practice Configuration
                   </CardTitle>
                   <CardDescription>
-                    Generate audio dialogue with questions matching real IELTS format
+                    Generate audio dialogue with questions. Limits optimized for Gemini free tier (max ~2 min audio).
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -515,11 +550,113 @@ export default function AIPractice() {
                         >
                           <div className="font-medium">{type.label}</div>
                           <div className="text-sm text-muted-foreground">{type.description}</div>
-                          <Badge variant="secondary" className="mt-2">
-                            {QUESTION_COUNTS[type.value]} questions
-                          </Badge>
                         </button>
                       ))}
+                    </div>
+                  </div>
+
+                  {/* Transcript Configuration */}
+                  <div className="space-y-4 border-t pt-6">
+                    <Label className="text-base font-medium flex items-center gap-2">
+                      <Settings2 className="w-4 h-4" />
+                      Audio Length
+                    </Label>
+                    
+                    {/* Preset Selection */}
+                    <RadioGroup 
+                      value={listeningTranscriptPreset} 
+                      onValueChange={(v) => setListeningTranscriptPreset(v as keyof typeof LISTENING_TRANSCRIPT_PRESETS)}
+                      className="grid grid-cols-2 gap-3"
+                    >
+                      {Object.entries(LISTENING_TRANSCRIPT_PRESETS).map(([key, preset]) => (
+                        <div key={key} className="flex items-center space-x-2">
+                          <RadioGroupItem value={key} id={`listening-preset-${key}`} />
+                          <Label 
+                            htmlFor={`listening-preset-${key}`} 
+                            className="cursor-pointer text-sm"
+                          >
+                            {preset.label}
+                          </Label>
+                        </div>
+                      ))}
+                    </RadioGroup>
+
+                    {/* Custom Configuration */}
+                    {listeningTranscriptPreset === 'custom' && (
+                      <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm">Configure by:</Label>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs ${!listeningUseWordCountMode ? 'font-medium' : 'text-muted-foreground'}`}>
+                              Duration
+                            </span>
+                            <Switch
+                              checked={listeningUseWordCountMode}
+                              onCheckedChange={setListeningUseWordCountMode}
+                            />
+                            <span className={`text-xs ${listeningUseWordCountMode ? 'font-medium' : 'text-muted-foreground'}`}>
+                              Word Count
+                            </span>
+                          </div>
+                        </div>
+
+                        {listeningUseWordCountMode ? (
+                          <div className="space-y-2">
+                            <div className="flex justify-between">
+                              <Label className="text-sm">Transcript Words</Label>
+                              <span className="text-sm font-medium">{customTranscriptWordCount} words</span>
+                            </div>
+                            <Slider
+                              value={[customTranscriptWordCount]}
+                              onValueChange={([v]) => setCustomTranscriptWordCount(v)}
+                              min={100}
+                              max={300}
+                              step={25}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              ~{Math.round(customTranscriptWordCount / 150 * 60)} seconds of audio
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="flex justify-between">
+                              <Label className="text-sm">Audio Duration</Label>
+                              <span className="text-sm font-medium">{customTranscriptDuration} seconds</span>
+                            </div>
+                            <Slider
+                              value={[customTranscriptDuration]}
+                              onValueChange={([v]) => setCustomTranscriptDuration(v)}
+                              min={30}
+                              max={120}
+                              step={15}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              ~{Math.round(customTranscriptDuration / 60 * 150)} words of dialogue
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Question Count */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-base font-medium">Number of Questions</Label>
+                      <span className="text-sm font-medium">{listeningQuestionCount}</span>
+                    </div>
+                    <Slider
+                      value={[listeningQuestionCount]}
+                      onValueChange={([v]) => setListeningQuestionCount(v)}
+                      min={1}
+                      max={8}
+                      step={1}
+                      className="w-full"
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>1 (Quick)</span>
+                      <span>4 (Standard)</span>
+                      <span>8 (Max)</span>
                     </div>
                   </div>
 
