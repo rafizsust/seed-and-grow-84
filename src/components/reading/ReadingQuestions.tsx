@@ -441,10 +441,12 @@ export function ReadingQuestions({
                 case 'FILL_IN_BLANK':
                 case 'SENTENCE_COMPLETION':
                 case 'SHORT_ANSWER':
-                case 'SUMMARY_COMPLETION':
-                case 'SUMMARY_WORD_BANK':
                 case 'NOTE_COMPLETION':
                   return "Write **NO MORE THAN TWO WORDS** from the passage for each answer.";
+                case 'SUMMARY_COMPLETION':
+                case 'SUMMARY_WORD_BANK':
+                  // Word bank questions use drag-drop, so instruction should reflect that
+                  return "Complete the summary below. Choose the correct letter from the word bank for each answer.";
                 default:
                   return `Answer the following ${getQuestionTypeLabel(type).toLowerCase()} questions.`;
               }

@@ -36,11 +36,14 @@ export function FillInBlank({
 }: FillInBlankProps) {
   // Match any sequence of 2+ underscores as a potential blank.
   // IMPORTANT: Some generated content may contain decorative underscores that are NOT blanks.
-  // We only render an input for blanks that are followed by a question number (e.g. "____ 12").
   const anyUnderscorePattern = /_{2,}/;
   const hasPotentialInlineBlank = anyUnderscorePattern.test(question.question_text);
 
+  // Pattern for numbered blanks like "_____ 1" or "_____ (1)" or "_____1"
   const inlineNumberedBlankPattern = /_{2,}\s*\(?\s*(\d+)\s*\)?\.?/g;
+  
+  // Check if we have numbered blanks or just plain underscores
+  const hasNumberedBlanks = /_{2,}\s*\(?\s*\d+\s*\)?\.?/.test(question.question_text);
 
   const renderControl = () => {
     if (useDropdown) {
@@ -74,95 +77,117 @@ export function FillInBlank({
     }
 
     return (
-      <span className="relative inline-flex items-center mx-0.5">
-        <input
-          type="text"
-          value={answer || ''}
-          onChange={(e) => onAnswerChange(e.target.value)}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
-          onFocus={(e) => e.stopPropagation()}
-          placeholder={String(question.question_number)}
-          className={cn(
-            "ielts-input h-7 text-sm font-normal text-center min-w-[174px] max-w-full rounded-[3px]",
-            "bg-[hsl(var(--ielts-input-bg,0_0%_100%))] border border-[hsl(var(--ielts-input-border))] text-foreground",
-            "focus:outline-none focus:border-[hsl(var(--ielts-input-focus))] focus:border-2",
-            "transition-colors placeholder:text-center placeholder:font-bold placeholder:text-foreground/70",
-            isActive && "border-[hsl(var(--ielts-input-focus))] border-2"
-          )}
-          style={{ verticalAlign: 'baseline', fontFamily: 'var(--font-ielts)' }}
-        />
-      </span>
+      <input
+        type="text"
+        value={answer || ''}
+        onChange={(e) => onAnswerChange(e.target.value)}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onFocus={(e) => e.stopPropagation()}
+        placeholder={String(question.question_number)}
+        className={cn(
+          "ielts-input h-7 text-sm font-normal text-center min-w-[174px] max-w-full rounded-[3px] mx-0.5",
+          "bg-[hsl(var(--ielts-input-bg,0_0%_100%))] border border-[hsl(var(--ielts-input-border))] text-foreground",
+          "focus:outline-none focus:border-[hsl(var(--ielts-input-focus))] focus:border-2",
+          "transition-colors placeholder:text-center placeholder:font-bold placeholder:text-foreground/70",
+          isActive && "border-[hsl(var(--ielts-input-focus))] border-2"
+        )}
+        style={{ verticalAlign: 'baseline', fontFamily: 'var(--font-ielts)' }}
+      />
     );
   };
 
   const controlElement = renderControl();
 
+  // Handle questions with inline blanks (underscores)
   if (hasPotentialInlineBlank) {
-    const nodes: Array<{ type: 'html'; value: string } | { type: 'input' } | { type: 'decorativeBlank' }> = [];
+    // If there are numbered blanks, use the numbered pattern
+    if (hasNumberedBlanks) {
+      const nodes: Array<{ type: 'html'; value: string } | { type: 'input' } | { type: 'decorativeBlank' }> = [];
 
-    let lastIndex = 0;
-    let match: RegExpExecArray | null;
+      let lastIndex = 0;
+      let match: RegExpExecArray | null;
 
-    // Reset regex state in case of re-renders
-    inlineNumberedBlankPattern.lastIndex = 0;
+      // Reset regex state in case of re-renders
+      inlineNumberedBlankPattern.lastIndex = 0;
 
-    while ((match = inlineNumberedBlankPattern.exec(question.question_text)) !== null) {
-      const matchStart = match.index;
-      const matchEnd = inlineNumberedBlankPattern.lastIndex;
-      const num = Number(match[1]);
+      while ((match = inlineNumberedBlankPattern.exec(question.question_text)) !== null) {
+        const matchStart = match.index;
+        const matchEnd = inlineNumberedBlankPattern.lastIndex;
+        const num = Number(match[1]);
 
-      if (matchStart > lastIndex) {
-        nodes.push({ type: 'html', value: question.question_text.slice(lastIndex, matchStart) });
+        if (matchStart > lastIndex) {
+          nodes.push({ type: 'html', value: question.question_text.slice(lastIndex, matchStart) });
+        }
+
+        // Only turn into an input if it matches THIS question's number.
+        // Otherwise render a decorative blank line so we never create multiple synced inputs.
+        if (num === question.question_number) {
+          nodes.push({ type: 'input' });
+        } else {
+          nodes.push({ type: 'decorativeBlank' });
+          // Keep the number text in the rendered output for other questions in the group.
+          nodes.push({ type: 'html', value: ` ${num} ` });
+        }
+
+        lastIndex = matchEnd;
       }
 
-      // Only turn into an input if it matches THIS question's number.
-      // Otherwise render a decorative blank line so we never create multiple synced inputs.
-      if (num === question.question_number) {
-        nodes.push({ type: 'input' });
-      } else {
-        nodes.push({ type: 'decorativeBlank' });
-        // Keep the number text in the rendered output for other questions in the group.
-        nodes.push({ type: 'html', value: ` ${num} ` });
+      if (lastIndex < question.question_text.length) {
+        nodes.push({ type: 'html', value: question.question_text.slice(lastIndex) });
       }
 
-      lastIndex = matchEnd;
-    }
+      return (
+        <div onClick={() => { onSetActive?.(); }} className="mt-2">
+          <p className={cn("leading-relaxed", isActive ? "text-foreground" : "text-foreground")} style={{ lineHeight: '2' }}>
+            {nodes.map((n, idx) => {
+              if (n.type === 'input') {
+                return <span key={idx}>{controlElement}</span>;
+              }
 
-    if (lastIndex < question.question_text.length) {
-      nodes.push({ type: 'html', value: question.question_text.slice(lastIndex) });
-    }
+              if (n.type === 'decorativeBlank') {
+                return (
+                  <span
+                    key={idx}
+                    className="inline-block align-baseline mx-0.5 min-w-[4rem] border-b border-border"
+                    aria-hidden="true"
+                  />
+                );
+              }
 
-    return (
-      <div onClick={() => { onSetActive?.(); }} className="mt-2">
-        <p className={cn("leading-relaxed", isActive ? "text-foreground" : "text-foreground")} style={{ lineHeight: '2' }}>
-          {nodes.map((n, idx) => {
-            if (n.type === 'input') {
-              return <span key={idx}>{controlElement}</span>;
-            }
-
-            if (n.type === 'decorativeBlank') {
               return (
                 <span
                   key={idx}
-                  className="inline-block align-baseline mx-0.5 min-w-[4rem] border-b border-border"
-                  aria-hidden="true"
+                  dangerouslySetInnerHTML={{ __html: renderText(n.value) }}
                 />
               );
-            }
-
-            return (
-              <span
-                key={idx}
-                dangerouslySetInnerHTML={{ __html: renderText(n.value) }}
-              />
-            );
-          })}
-        </p>
-      </div>
-    );
+            })}
+          </p>
+        </div>
+      );
+    }
+    
+    // For unnumbered blanks (just _____), split and insert input where blanks are
+    const parts = question.question_text.split(/_{2,}/);
+    
+    if (parts.length > 1) {
+      return (
+        <div onClick={() => { onSetActive?.(); }} className="mt-2">
+          <p className={cn("leading-relaxed", isActive ? "text-foreground" : "text-foreground")} style={{ lineHeight: '2' }}>
+            {parts.map((part, idx) => (
+              <span key={idx}>
+                <span dangerouslySetInnerHTML={{ __html: renderText(part.trim()) }} />
+                {idx < parts.length - 1 && controlElement}
+              </span>
+            ))}
+          </p>
+        </div>
+      );
+    }
   }
+  
+  // Fallback: no inline blank - just show the control element (input will have question number as placeholder)
   return (
     <span onClick={() => onSetActive?.()} className="inline-flex items-baseline">
       {controlElement}

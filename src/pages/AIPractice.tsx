@@ -53,11 +53,9 @@ const READING_QUESTION_TYPES: { value: ReadingQuestionType; label: string; descr
   { value: 'MULTIPLE_CHOICE', label: 'Multiple Choice (Single)', description: 'Choose one correct answer' },
   { value: 'MULTIPLE_CHOICE_MULTIPLE', label: 'Multiple Choice (Multi)', description: 'Choose multiple correct answers' },
   { value: 'FILL_IN_BLANK', label: 'Fill in the Blank', description: 'Complete sentences with words from passage' },
-  { value: 'SENTENCE_COMPLETION', label: 'Sentence Completion', description: 'Complete sentences with given words' },
   { value: 'SUMMARY_COMPLETION', label: 'Summary/Word Bank', description: 'Fill in a summary using word bank' },
   { value: 'TABLE_COMPLETION', label: 'Table Completion', description: 'Complete a table with information' },
   { value: 'FLOWCHART_COMPLETION', label: 'Flowchart Completion', description: 'Complete steps in a process flowchart' },
-  { value: 'NOTE_COMPLETION', label: 'Note Completion', description: 'Complete notes with missing information' },
   { value: 'MAP_LABELING', label: 'Map/Diagram Labeling', description: 'Label parts of a map or diagram' },
 ];
 
