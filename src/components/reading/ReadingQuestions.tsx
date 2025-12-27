@@ -627,18 +627,37 @@ export function ReadingQuestions({
                     const groupOptions = groupData?.options as any;
                     const optionsTitle = groupOptions?.options_title || 'List of Paragraphs';
                     
-                    // Get options array - could be stored as array directly or as options.options
-                    const optionsArray = Array.isArray(groupOptions) 
-                      ? groupOptions 
-                      : Array.isArray(groupOptions?.options) 
-                        ? groupOptions.options 
-                        : paragraphLabels || [];
+                    // Get options array - AI format: {options: [{letter, text}]} or [{letter, text}] directly
+                    let optionsArray: any[] = [];
+                    if (Array.isArray(groupOptions)) {
+                      optionsArray = groupOptions;
+                    } else if (Array.isArray(groupOptions?.options)) {
+                      optionsArray = groupOptions.options;
+                    } else if (paragraphLabels && paragraphLabels.length > 0) {
+                      optionsArray = paragraphLabels;
+                    }
                     
                     // Transform to MatchingOption format {letter, text}
-                    const matchingOptions = optionsArray.map((opt: string, idx: number) => ({
-                      letter: String.fromCharCode(65 + idx), // A, B, C, D...
-                      text: opt
-                    }));
+                    // Handle both object format {letter, text} and string format
+                    const matchingOptions = optionsArray.map((opt: any, idx: number) => {
+                      if (typeof opt === 'object' && opt?.letter && opt?.text) {
+                        return { letter: opt.letter, text: opt.text };
+                      }
+                      // Fallback for string-only options
+                      return {
+                        letter: String.fromCharCode(65 + idx), // A, B, C, D...
+                        text: typeof opt === 'string' ? opt : String(opt)
+                      };
+                    });
+                    
+                    // If no options found, show error
+                    if (matchingOptions.length === 0) {
+                      return (
+                        <div className="text-destructive text-sm">
+                          No paragraph options found for Matching Information questions.
+                        </div>
+                      );
+                    }
                     
                     // Transform questions to MatchingInformationQuestion format
                     const matchingQuestions = typeQuestions.map(q => ({

@@ -209,14 +209,21 @@ export default function AIPracticeReadingTest() {
   };
 
   // Extract just the paragraph letter from question_text (e.g., "Paragraph A" -> "A")
-  const headingParagraphLabels = useMemo(
-    () => matchingHeadingsQuestions.map(q => {
+  // Also create a mapping from extracted label back to question for answer syncing
+  const { headingParagraphLabels, labelToQuestionMap } = useMemo(() => {
+    const labels: string[] = [];
+    const mapping: Record<string, Question> = {};
+    
+    matchingHeadingsQuestions.forEach(q => {
       // Try to extract just the letter from "Paragraph A" format
       const match = q.question_text.match(/(?:Paragraph\s+)?([A-Z])$/i);
-      return match ? match[1].toUpperCase() : q.question_text;
-    }),
-    [matchingHeadingsQuestions]
-  );
+      const label = match ? match[1].toUpperCase() : q.question_text.toUpperCase();
+      labels.push(label);
+      mapping[label] = q;
+    });
+    
+    return { headingParagraphLabels: labels, labelToQuestionMap: mapping };
+  }, [matchingHeadingsQuestions]);
 
   const headingOptions = useMemo(() => {
     if (!hasMatchingHeadings) return [];
@@ -271,16 +278,13 @@ export default function AIPracticeReadingTest() {
       return next;
     });
 
-    // Find matching question - compare against both extracted label and full question_text
-    // paragraphLabel is just "A", "B" etc., but question_text might be "Paragraph A" or just "A"
-    const matchingQ = matchingHeadingsQuestions.find(q => {
-      const qText = q.question_text;
-      // Match if question_text equals label directly, or if it ends with the label (e.g., "Paragraph A" ends with "A")
-      const extractedLabel = qText.match(/(?:Paragraph\s+)?([A-Z])$/i)?.[1]?.toUpperCase();
-      return qText === paragraphLabel || extractedLabel === paragraphLabel;
-    });
-    if (matchingQ) setAnswers(prev => ({ ...prev, [matchingQ.question_number]: headingId }));
-  }, [matchingHeadingsQuestions]);
+    // Use direct lookup from pre-computed mapping - paragraphLabel is "A", "B", etc.
+    const normalizedLabel = paragraphLabel.toUpperCase();
+    const matchingQ = labelToQuestionMap[normalizedLabel];
+    if (matchingQ) {
+      setAnswers(prev => ({ ...prev, [matchingQ.question_number]: headingId }));
+    }
+  }, [labelToQuestionMap]);
 
   const handleHeadingRemove = useCallback((paragraphLabel: string) => {
     setHeadingAnswers(prev => {
@@ -289,14 +293,13 @@ export default function AIPracticeReadingTest() {
       return next;
     });
 
-    // Find matching question - same logic as handleHeadingDrop
-    const matchingQ = matchingHeadingsQuestions.find(q => {
-      const qText = q.question_text;
-      const extractedLabel = qText.match(/(?:Paragraph\s+)?([A-Z])$/i)?.[1]?.toUpperCase();
-      return qText === paragraphLabel || extractedLabel === paragraphLabel;
-    });
-    if (matchingQ) setAnswers(prev => ({ ...prev, [matchingQ.question_number]: '' }));
-  }, [matchingHeadingsQuestions]);
+    // Use direct lookup from pre-computed mapping
+    const normalizedLabel = paragraphLabel.toUpperCase();
+    const matchingQ = labelToQuestionMap[normalizedLabel];
+    if (matchingQ) {
+      setAnswers(prev => ({ ...prev, [matchingQ.question_number]: '' }));
+    }
+  }, [labelToQuestionMap]);
 
   const handleSelectPlace = useCallback((paragraphLabel: string) => {
     if (!selectedHeading) return;
