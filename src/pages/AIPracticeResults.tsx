@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
@@ -16,10 +16,10 @@ import {
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { 
-  CheckCircle2, 
-  XCircle, 
-  Clock, 
+import {
+  CheckCircle2,
+  XCircle,
+  Clock,
   BookOpen,
   Headphones,
   RotateCcw,
@@ -31,9 +31,22 @@ import {
   Send,
   Loader2,
   Bot,
-  User
+  User,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+function extractOptionId(option: string): string {
+  const trimmed = (option ?? '').trim();
+  const m = trimmed.match(/^([A-Z]|\d+|[ivxlcdm]+)\b/i);
+  return (m?.[1] ?? trimmed).toUpperCase();
+}
+
+function extractOptionText(option: string): string {
+  const trimmed = (option ?? '').trim();
+  const id = extractOptionId(trimmed);
+  const rest = trimmed.replace(new RegExp(`^${id}\\b\\s*`, 'i'), '').trim();
+  return rest.length ? rest : trimmed;
+}
 
 interface ChatMessage {
   id: string;
@@ -259,6 +272,36 @@ export default function AIPracticeResults() {
     );
   }
 
+  // Option maps for MATCHING_SENTENCE_ENDINGS so results show the chosen text (not just the letter).
+  const sentenceEndingOptionByQuestionNumber = useMemo(() => {
+    const out: Record<number, Map<string, string>> = {};
+
+    for (const g of test.questionGroups || []) {
+      if (g.question_type !== 'MATCHING_SENTENCE_ENDINGS') continue;
+
+      const raw: any = g.options || {};
+      const opts: any[] = Array.isArray(raw?.sentence_endings)
+        ? raw.sentence_endings
+        : Array.isArray(raw?.options)
+          ? raw.options
+          : Array.isArray(raw)
+            ? raw
+            : [];
+
+      const map = new Map<string, string>();
+      for (const opt of opts) {
+        const asStr = typeof opt === 'string' ? opt : `${opt.id || ''} ${opt.text || ''}`.trim();
+        map.set(extractOptionId(asStr), asStr);
+      }
+
+      for (const q of g.questions || []) {
+        out[q.question_number] = map;
+      }
+    }
+
+    return out;
+  }, [test.questionGroups]);
+
   const percentage = Math.round((result.score / result.totalQuestions) * 100);
 
   return (
@@ -430,26 +473,54 @@ export default function AIPracticeResults() {
                             <p>{question?.question_text}</p>
                           </div>
 
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <p className="text-sm font-medium text-muted-foreground mb-1">Your Answer</p>
-                              <p className={cn(
-                                "font-medium",
-                                qResult.isCorrect ? "text-success" : "text-destructive"
-                              )}>
-                                {qResult.userAnswer 
-                                  ? qResult.userAnswer.split(',').join(', ')  // Format comma-separated answers nicely
-                                  : '(No answer)'}
-                              </p>
-                            </div>
-                            
-                            <div>
-                              <p className="text-sm font-medium text-muted-foreground mb-1">Correct Answer</p>
-                              <p className="font-medium text-success">
-                                {qResult.correctAnswer.split(',').join(', ')}
-                              </p>
-                            </div>
-                          </div>
+                          {(() => {
+                            const type = question?.question_type;
+
+                            const renderSentenceEnding = (value: string) => {
+                              const id = extractOptionId(value);
+                              const map = sentenceEndingOptionByQuestionNumber[qResult.questionNumber];
+                              const full = map?.get(id);
+                              const text = full ? extractOptionText(full) : '';
+                              return text ? `${id}. ${text}` : id;
+                            };
+
+                            const renderAnswers = (value: string, kind: 'user' | 'correct') => {
+                              if (!value) return kind === 'user' ? '(No answer)' : '';
+
+                              if (type === 'MATCHING_SENTENCE_ENDINGS') {
+                                return renderSentenceEnding(value);
+                              }
+
+                              if (type === 'MULTIPLE_CHOICE_MULTIPLE') {
+                                return value.split(',').map((v) => v.trim()).filter(Boolean).join(', ');
+                              }
+
+                              return value;
+                            };
+
+                            return (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                  <p className="text-sm font-medium text-muted-foreground mb-1">Your Answer</p>
+                                  <p
+                                    className={cn(
+                                      "font-medium",
+                                      qResult.isCorrect ? "text-success" : "text-destructive"
+                                    )}
+                                  >
+                                    {renderAnswers(qResult.userAnswer, 'user')}
+                                  </p>
+                                </div>
+
+                                <div>
+                                  <p className="text-sm font-medium text-muted-foreground mb-1">Correct Answer</p>
+                                  <p className="font-medium text-success">
+                                    {renderAnswers(qResult.correctAnswer, 'correct')}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           <div className="bg-muted/50 rounded-lg p-4">
                             <p className="text-sm font-medium text-muted-foreground mb-1">Explanation</p>

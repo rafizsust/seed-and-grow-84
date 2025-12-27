@@ -414,14 +414,43 @@ export default function AIPracticeReadingTest() {
     return `${contrastClass} ${textSizeClass}`;
   };
 
-  // Submit stats
+  // Submit stats (group-aware)
+  // For MULTIPLE_CHOICE_MULTIPLE we store the selected letters only on start_question,
+  // but the group represents N answers (max_answers). The submit dialog should reflect that.
   const submitStats = useMemo(() => {
-    const totalCount = questions.length;
-    const answeredCount = Object.keys(answers).filter(k => 
-      answers[Number(k)]?.trim().length > 0
-    ).length;
+    if (!questionGroups.length) {
+      const totalCount = questions.length;
+      const answeredCount = Object.keys(answers).filter((k) => answers[Number(k)]?.trim().length > 0).length;
+      return { totalCount, answeredCount };
+    }
+
+    let totalCount = 0;
+    let answeredCount = 0;
+
+    for (const group of questionGroups) {
+      const rangeCount = Math.max(0, (group.end_question ?? 0) - (group.start_question ?? 0) + 1);
+
+      if (group.question_type === 'MULTIPLE_CHOICE_MULTIPLE') {
+        const maxAnswers = Number(group.options?.max_answers ?? rangeCount ?? 2) || 2;
+        totalCount += maxAnswers;
+
+        const selected = (answers[group.start_question] ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+        answeredCount += Math.min(selected.length, maxAnswers);
+        continue;
+      }
+
+      totalCount += rangeCount;
+      for (let qNum = group.start_question; qNum <= group.end_question; qNum++) {
+        if (answers[qNum]?.trim()) answeredCount += 1;
+      }
+    }
+
     return { totalCount, answeredCount };
-  }, [answers, questions]);
+  }, [answers, questions.length, questionGroups]);
 
   const getQuestionGroupOptions = useCallback((questionGroupId: string | null): any => {
     if (!questionGroupId) return null;

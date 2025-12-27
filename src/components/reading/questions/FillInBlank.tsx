@@ -34,9 +34,13 @@ export function FillInBlank({
   useDropdown = false,
   wordBank = [],
 }: FillInBlankProps) {
-  // Match any sequence of 2 or more underscores as a blank
-  const blankPattern = /_{2,}/;
-  const hasInlineBlank = blankPattern.test(question.question_text);
+  // Match any sequence of 2+ underscores as a potential blank.
+  // IMPORTANT: Some generated content may contain decorative underscores that are NOT blanks.
+  // We only render an input for blanks that are followed by a question number (e.g. "____ 12").
+  const anyUnderscorePattern = /_{2,}/;
+  const hasPotentialInlineBlank = anyUnderscorePattern.test(question.question_text);
+
+  const inlineNumberedBlankPattern = /_{2,}\s*\(?\s*(\d+)\s*\)?\.?/g;
 
   const renderControl = () => {
     if (useDropdown) {
@@ -95,36 +99,70 @@ export function FillInBlank({
 
   const controlElement = renderControl();
 
-  if (hasInlineBlank) {
-    // Split by any sequence of 2+ underscores
-    const parts = question.question_text.split(/_{2,}/);
+  if (hasPotentialInlineBlank) {
+    const nodes: Array<{ type: 'html'; value: string } | { type: 'input' } | { type: 'decorativeBlank' }> = [];
+
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    // Reset regex state in case of re-renders
+    inlineNumberedBlankPattern.lastIndex = 0;
+
+    while ((match = inlineNumberedBlankPattern.exec(question.question_text)) !== null) {
+      const matchStart = match.index;
+      const matchEnd = inlineNumberedBlankPattern.lastIndex;
+      const num = Number(match[1]);
+
+      if (matchStart > lastIndex) {
+        nodes.push({ type: 'html', value: question.question_text.slice(lastIndex, matchStart) });
+      }
+
+      // Only turn into an input if it matches THIS question's number.
+      // Otherwise render a decorative blank line so we never create multiple synced inputs.
+      if (num === question.question_number) {
+        nodes.push({ type: 'input' });
+      } else {
+        nodes.push({ type: 'decorativeBlank' });
+        // Keep the number text in the rendered output for other questions in the group.
+        nodes.push({ type: 'html', value: ` ${num} ` });
+      }
+
+      lastIndex = matchEnd;
+    }
+
+    if (lastIndex < question.question_text.length) {
+      nodes.push({ type: 'html', value: question.question_text.slice(lastIndex) });
+    }
 
     return (
       <div onClick={() => { onSetActive?.(); }} className="mt-2">
-        <p
-          className={cn(
-            "leading-relaxed",
-            isActive ? "text-foreground" : "text-foreground"
-          )}
-          style={{ lineHeight: '2' }}
-        >
-          {parts.map((part, idx) => {
-            // Remove trailing question number (e.g., "32." or "32") before the blank
-            const cleanedPart = idx < parts.length - 1 
-              ? part.replace(/\s*\d+\.?\s*$/, ' ')
-              : part;
+        <p className={cn("leading-relaxed", isActive ? "text-foreground" : "text-foreground")} style={{ lineHeight: '2' }}>
+          {nodes.map((n, idx) => {
+            if (n.type === 'input') {
+              return <span key={idx}>{controlElement}</span>;
+            }
+
+            if (n.type === 'decorativeBlank') {
+              return (
+                <span
+                  key={idx}
+                  className="inline-block align-baseline mx-0.5 min-w-[4rem] border-b border-border"
+                  aria-hidden="true"
+                />
+              );
+            }
+
             return (
-              <span key={idx}>
-                <span dangerouslySetInnerHTML={{ __html: renderText(cleanedPart) }} />
-                {idx < parts.length - 1 && controlElement}
-              </span>
+              <span
+                key={idx}
+                dangerouslySetInnerHTML={{ __html: renderText(n.value) }}
+              />
             );
           })}
         </p>
       </div>
     );
   }
-
   return (
     <span onClick={() => onSetActive?.()} className="inline-flex items-baseline">
       {controlElement}

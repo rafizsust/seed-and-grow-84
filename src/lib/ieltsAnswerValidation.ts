@@ -780,13 +780,24 @@ export function checkMultipleChoiceMultiple(userAnswer: string, correctAnswer: s
  * Smart answer checker that determines the question type and applies appropriate logic
  */
 export function checkAnswer(
-  userAnswer: string, 
-  correctAnswer: string, 
+  userAnswer: string,
+  correctAnswer: string,
   questionType?: string
 ): boolean {
   // Handle multiple choice multiple answers
   if (questionType === 'MULTIPLE_CHOICE_MULTIPLE') {
     return checkMultipleChoiceMultiple(userAnswer, correctAnswer);
+  }
+
+  // Matching Sentence Endings: compare by option id (A/B/C...), not full text.
+  if (questionType === 'MATCHING_SENTENCE_ENDINGS') {
+    const extractId = (s: string) => {
+      const trimmed = (s ?? '').trim();
+      const m = trimmed.match(/^([A-Z]|\d+|[ivxlcdm]+)\b/i);
+      return (m?.[1] ?? trimmed).toUpperCase();
+    };
+    if (!userAnswer || !correctAnswer) return false;
+    return extractId(userAnswer) === extractId(correctAnswer);
   }
 
   // Use IELTS-aware validation for other types
