@@ -43,14 +43,31 @@ function parseTranscript(transcript: string): TranscriptLine[] {
   // Split by newlines and process each line
   const rawLines = transcript.split('\n').filter(line => line.trim());
   
+  // First pass: extract actual speaker names from the dialogue
+  // Pattern: "Name (role):" or just "Name:" where Name is a proper name
+  const speakerNamePattern = /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*(?:\([^)]+\))?\s*:\s*/;
+  const genericSpeakerPattern = /^(Speaker\s*\d+|Speaker\s*[A-Z]|Speaker1|Speaker2|Narrator|Interviewer|Host|Guest\s*\d*|Man|Woman|Male|Female|Student\s*\d*|Teacher|Professor|Examiner|Candidate)\s*:\s*/i;
+  
   for (const line of rawLines) {
-    // Match patterns like "Speaker 1:", "Speaker A:", "Narrator:", "Interviewer:", etc.
-    const speakerMatch = line.match(/^(Speaker\s*\d+|Speaker\s*[A-Z]|Narrator|Interviewer|Host|Guest\s*\d*|Man|Woman|Male|Female|Student\s*\d*|Teacher|Professor|Examiner|Candidate)\s*:\s*/i);
+    // Try to match a proper name first (e.g., "Sarah:", "John Smith:", "Emma (receptionist):")
+    let speakerMatch = line.match(speakerNamePattern);
+    let speaker = '';
+    let text = '';
     
     if (speakerMatch) {
-      const speaker = speakerMatch[1].trim();
-      const text = line.slice(speakerMatch[0].length).trim();
-      
+      speaker = speakerMatch[1].trim();
+      text = line.slice(speakerMatch[0].length).trim();
+    } else {
+      // Fall back to generic speaker patterns
+      const genericMatch = line.match(genericSpeakerPattern);
+      if (genericMatch) {
+        // Convert "Speaker1" to "Speaker 1" for better display
+        speaker = genericMatch[1].replace(/Speaker(\d+)/i, 'Speaker $1').trim();
+        text = line.slice(genericMatch[0].length).trim();
+      }
+    }
+    
+    if (speaker && text) {
       if (!speakerMap.has(speaker.toLowerCase())) {
         speakerMap.set(speaker.toLowerCase(), speakerCounter++);
       }

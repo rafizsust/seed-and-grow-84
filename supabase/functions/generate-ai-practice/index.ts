@@ -344,6 +344,13 @@ interface SpeakerConfigInput {
   useTwoSpeakers: boolean;
 }
 
+// Store last TTS error for user-friendly messages
+let lastTTSError: string | null = null;
+
+function getLastTTSError(): string {
+  return lastTTSError || 'Audio generation failed. Please try again.';
+}
+
 // Generate TTS audio using Gemini with retry logic and configurable voices
 async function generateAudio(
   apiKey: string, 
@@ -351,6 +358,8 @@ async function generateAudio(
   speakerConfig?: SpeakerConfigInput,
   maxRetries = 3
 ): Promise<{ audioBase64: string; sampleRate: number } | null> {
+  lastTTSError = null;
+  
   // Get voice names from config or use defaults
   const speaker1Voice = speakerConfig?.speaker1?.voiceName || 'Kore';
   const speaker2Voice = speakerConfig?.speaker2?.voiceName || 'Puck';
@@ -368,19 +377,30 @@ Use a moderate speaking pace with natural pauses between sentences.
 
 ${script}`;
 
-  // Build voice configs based on whether we have 1 or 2 speakers
-  const speakerVoiceConfigs = useTwoSpeakers
-    ? [
-        { speaker: "Speaker1", voiceConfig: { prebuiltVoiceConfig: { voiceName: speaker1Voice } } },
-        { speaker: "Speaker2", voiceConfig: { prebuiltVoiceConfig: { voiceName: speaker2Voice } } },
-      ]
-    : [
-        { speaker: "Speaker1", voiceConfig: { prebuiltVoiceConfig: { voiceName: speaker1Voice } } },
-      ];
+  // Build speech config based on whether we have 1 or 2 speakers
+  // For single speaker (monologue), use voiceConfig instead of multiSpeakerVoiceConfig
+  let speechConfig;
+  if (useTwoSpeakers) {
+    speechConfig = {
+      multiSpeakerVoiceConfig: {
+        speakerVoiceConfigs: [
+          { speaker: "Speaker1", voiceConfig: { prebuiltVoiceConfig: { voiceName: speaker1Voice } } },
+          { speaker: "Speaker2", voiceConfig: { prebuiltVoiceConfig: { voiceName: speaker2Voice } } },
+        ],
+      },
+    };
+  } else {
+    // Single speaker - use simple voiceConfig (NOT multiSpeakerVoiceConfig)
+    speechConfig = {
+      voiceConfig: {
+        prebuiltVoiceConfig: { voiceName: speaker1Voice }
+      },
+    };
+  }
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`Generating TTS audio (attempt ${attempt}/${maxRetries}) with voices: ${speaker1Voice}${useTwoSpeakers ? `, ${speaker2Voice}` : ''}...`);
+      console.log(`Generating TTS audio (attempt ${attempt}/${maxRetries}) with voices: ${speaker1Voice}${useTwoSpeakers ? `, ${speaker2Voice}` : ' (monologue)'}...`);
       
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`,
@@ -391,11 +411,7 @@ ${script}`;
             contents: [{ parts: [{ text: ttsPrompt }] }],
             generationConfig: {
               responseModalities: ["AUDIO"],
-              speechConfig: {
-                multiSpeakerVoiceConfig: {
-                  speakerVoiceConfigs,
-                },
-              },
+              speechConfig,
             },
           }),
         }
@@ -404,6 +420,25 @@ ${script}`;
       if (!response.ok) {
         const errorText = await response.text();
         console.error(`TTS failed (attempt ${attempt}):`, errorText);
+        
+        // Parse error for user-friendly message
+        try {
+          const errorData = JSON.parse(errorText);
+          const errorMessage = errorData?.error?.message || '';
+          const errorCode = errorData?.error?.code || response.status;
+          
+          if (response.status === 429 || errorCode === 429) {
+            lastTTSError = 'API quota exceeded. Your Gemini API has reached its rate limit for audio generation. Please wait a few minutes and try again, or upgrade your Google AI Studio plan.';
+          } else if (response.status === 403) {
+            lastTTSError = 'API access denied for audio generation. Please verify your Gemini API key has TTS permissions enabled.';
+          } else if (response.status === 400) {
+            lastTTSError = `Audio generation request was rejected: ${errorMessage.slice(0, 100)}. Please try again.`;
+          } else {
+            lastTTSError = `Audio generation failed (error ${errorCode}): ${errorMessage.slice(0, 100)}`;
+          }
+        } catch {
+          lastTTSError = `Audio generation failed with status ${response.status}. Please try again.`;
+        }
         
         if ((response.status === 500 || response.status === 503) && attempt < maxRetries) {
           const delay = Math.pow(2, attempt) * 1000;
@@ -420,9 +455,12 @@ ${script}`;
       if (audioData) {
         console.log("TTS audio generated successfully");
         return { audioBase64: audioData, sampleRate: 24000 };
+      } else {
+        lastTTSError = 'Audio generation returned empty response. Please try again.';
       }
     } catch (err) {
       console.error(`TTS error (attempt ${attempt}):`, err);
+      lastTTSError = `Connection error during audio generation: ${err instanceof Error ? err.message : 'Unknown error'}`;
       if (attempt < maxRetries) {
         const delay = Math.pow(2, attempt) * 1000;
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -1023,18 +1061,21 @@ function getListeningPrompt(
   const characterInstructions = useTwoSpeakers
     ? `1. Create a dialogue script between two characters that is:
    - ${wordRange} words total (approximately ${targetDurationSeconds} seconds when spoken)
-   - Natural and conversational with realistic names/roles (e.g., "Receptionist:", "Mark:", "Dr. Smith:", "Sarah:")
-   - NEVER use generic labels like "Speaker 1" or "Speaker 2" in the transcript
-   - Invent context-appropriate names or roles based on the scenario
-   - In the output JSON, map the first character to "Speaker1:" and second to "Speaker2:" for TTS processing
+   - Natural and conversational with realistic names/roles (e.g., "Receptionist", "Mark", "Dr. Smith", "Sarah")
+   - In the output JSON dialogue field, you MUST use "Speaker1:" and "Speaker2:" prefixes for TTS processing
+   - ALSO include a "speaker_names" object in your JSON that maps Speaker1/Speaker2 to their real names
    - Contains specific details (names, numbers, dates, locations)
    
-   IMPORTANT: The dialogue field in JSON MUST use "Speaker1:" and "Speaker2:" prefixes (for audio generation),
-   but the conversation content should reference the characters by their realistic names.`
+   CRITICAL OUTPUT FORMAT:
+   - dialogue: Use "Speaker1:" and "Speaker2:" prefixes (required for audio generation)
+   - speaker_names: {"Speaker1": "Real Name or Role", "Speaker2": "Real Name or Role"}
+   - Example: speaker_names: {"Speaker1": "Sarah", "Speaker2": "Receptionist"}`
     : `1. Create a monologue script by a single speaker that is:
    - ${wordRange} words total (approximately ${targetDurationSeconds} seconds when spoken)
    - Clear and informative, like a tour guide, lecturer, or announcer
    - Use "Speaker1:" prefix for all lines (required for TTS)
+   - ALSO include a "speaker_names" object: {"Speaker1": "Appropriate Role/Title"}
+   - Example: speaker_names: {"Speaker1": "Tour Guide"} or {"Speaker1": "Professor Williams"}
    - Contains specific details (names, numbers, dates, locations)`;
 
   const basePrompt = `Generate an IELTS Listening test section with the following specifications:
@@ -1690,6 +1731,20 @@ serve(async (req) => {
 
       // Generate audio with speaker configuration
       const audio = await generateAudio(geminiApiKey, parsed.dialogue, listeningConfig?.speakerConfig);
+      
+      // For listening tests, audio is required - return error if TTS failed
+      if (!audio) {
+        const ttsError = getLastTTSError();
+        console.error('TTS generation failed for listening test:', ttsError);
+        return new Response(JSON.stringify({ 
+          error: `Audio generation failed: ${ttsError}`,
+          errorType: 'TTS_FAILED',
+          suggestion: 'Please check your Gemini API key quota or try again in a few minutes.'
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
 
       // Build group options based on question type
       let groupOptions: any = undefined;
@@ -1821,10 +1876,25 @@ serve(async (req) => {
         };
       });
 
+      // Process transcript to replace Speaker1/Speaker2 with real names if available
+      let displayTranscript = parsed.dialogue;
+      const speakerNames = parsed.speaker_names || {};
+      
+      if (speakerNames.Speaker1 || speakerNames.Speaker2) {
+        // Replace Speaker1/Speaker2 with actual names in transcript for display
+        if (speakerNames.Speaker1) {
+          displayTranscript = displayTranscript.replace(/Speaker1:/g, `${speakerNames.Speaker1}:`);
+        }
+        if (speakerNames.Speaker2) {
+          displayTranscript = displayTranscript.replace(/Speaker2:/g, `${speakerNames.Speaker2}:`);
+        }
+      }
+
       return new Response(JSON.stringify({
         testId,
         topic,
-        transcript: parsed.dialogue,
+        transcript: displayTranscript,
+        speakerNames: speakerNames,
         audioBase64: audio?.audioBase64 || null,
         audioFormat: audio ? 'pcm' : null,
         sampleRate: audio?.sampleRate || null,
