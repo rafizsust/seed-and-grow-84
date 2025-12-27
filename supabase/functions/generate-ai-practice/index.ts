@@ -444,12 +444,20 @@ interface ReadingConfig {
 // Listening configuration interface
 // Gemini free tier limits: ~15 min audio/day, keep each request to max ~2 min (70% of capacity)
 // ~150 words per minute of speech at normal pace
+interface SpellingModeConfig {
+  enabled: boolean;
+  testScenario: 'phone_call' | 'hotel_booking' | 'job_inquiry';
+  spellingDifficulty: 'low' | 'high';
+  numberFormat: 'phone_number' | 'date' | 'postcode';
+}
+
 interface ListeningConfig {
   transcriptPreset?: string;
   durationSeconds?: number;
   wordCount?: number;
   useWordCountMode?: boolean;
   speakerConfig?: SpeakerConfigInput;
+  spellingMode?: SpellingModeConfig;
 }
 
 // Reading question type prompts - generate structured data matching DB schema
@@ -1039,18 +1047,67 @@ ${characterInstructions}
 
 `;
 
-  switch (questionType) {
-    case 'FILL_IN_BLANK':
-      return basePrompt + `2. Create ${questionCount} fill-in-the-blank questions.
-   - IMPORTANT: Vary answer lengths - use a MIX of ONE word and TWO word answers
+  // Handle FILL_IN_BLANK with optional Spelling Mode
+  if (questionType === 'FILL_IN_BLANK') {
+    const spellingMode = listeningConfig?.spellingMode;
+    
+    if (spellingMode?.enabled) {
+      // IELTS Part 1 Style with spelling/number patterns
+      const scenarioMap = {
+        phone_call: 'a phone call inquiry (e.g., booking service, requesting information)',
+        hotel_booking: 'a hotel reservation phone call',
+        job_inquiry: 'a job application or recruitment inquiry call',
+      };
+      const difficultyDesc = spellingMode.spellingDifficulty === 'high' 
+        ? 'unusual or foreign-sounding names (e.g., "Cholmondeley", "Ankita Sharma")' 
+        : 'common but still spellings required names (e.g., "Thompson", "Catherine")';
+      const numberDesc = spellingMode.numberFormat === 'phone_number' 
+        ? 'phone numbers using "double" or "triple" patterns (e.g., "double seven, five, nine")' 
+        : spellingMode.numberFormat === 'date' 
+        ? 'dates (e.g., "the fifteenth of March")' 
+        : 'postcodes with letters and numbers mixed (e.g., "SW1A 1AA")';
+      
+      return basePrompt + `2. Create ${questionCount} fill-in-the-blank questions in IELTS Part 1 style.
+
+CRITICAL SPELLING & NUMBER RULES:
+- The dialogue MUST be ${scenarioMap[spellingMode.testScenario]}.
+- For at least one blank, Speaker A must SPELL OUT the answer letter-by-letter using dashes (e.g., "My name is Sharma. That's S-H-A-R-M-A").
+- Use ${difficultyDesc} for names.
+- Include ${numberDesc} for number-based gaps.
+- Create realistic "distractor and correction" patterns (e.g., "Oh wait, it's 4, not 5").
+- IMPORTANT: Vary answer lengths - use ONE word, TWO words, or THREE words:
+  - Some answers should be exactly 1 word (e.g., "Tuesday", "Sharma")
+  - Some answers should be exactly 2 words (e.g., "next Monday", "room three")
+  - Some answers can be 3 words (e.g., "conference room B")
+  - Maximum allowed is 3 words, but do NOT make all answers the same length
+
+Return ONLY valid JSON in this exact format:
+{
+  "dialogue": "Speaker1: Hello, I'd like to book an appointment...\\nSpeaker2: Certainly, can I take your name please?\\nSpeaker1: Yes, it's Ankita Sharma. That's A-N-K-I-T-A, and Sharma is S-H-A-R-M-A.\\nSpeaker2: Thank you. And your phone number?\\nSpeaker1: It's double seven, five, nine, oh, three, two, one.",
+  "instruction": "Complete the notes below. Write NO MORE THAN THREE WORDS for each answer.",
+  "questions": [
+    {
+      "question_number": 1,
+      "question_text": "Customer's surname: _____",
+      "correct_answer": "Sharma",
+      "explanation": "Speaker1 spells out S-H-A-R-M-A"
+    }
+  ]
+}`;
+    }
+    
+    // Standard Fill-in-Blank (no spelling mode)
+    return basePrompt + `2. Create ${questionCount} fill-in-the-blank questions.
+   - IMPORTANT: Vary answer lengths - use ONE word, TWO words, or THREE words
    - Some answers should be exactly 1 word (e.g., "Tuesday", "1985")
    - Some answers should be exactly 2 words (e.g., "next Monday", "room three")
-   - Maximum allowed is 2 words, but do NOT make all answers the same length
+   - Some answers can be 3 words (e.g., "main conference hall")
+   - Maximum allowed is 3 words, but do NOT make all answers the same length
 
 Return ONLY valid JSON in this exact format:
 {
   "dialogue": "Speaker1: Hello, welcome to the museum...\\nSpeaker2: Thank you...",
-  "instruction": "Complete the notes below. Write NO MORE THAN TWO WORDS for each answer.",
+  "instruction": "Complete the notes below. Write NO MORE THAN THREE WORDS for each answer.",
   "questions": [
     {
       "question_number": 1,
@@ -1060,7 +1117,9 @@ Return ONLY valid JSON in this exact format:
     }
   ]
 }`;
+  }
 
+  switch (questionType) {
     case 'TABLE_COMPLETION':
       return basePrompt + `2. Create a table completion task with ${questionCount} blanks.
 
@@ -1069,15 +1128,16 @@ CRITICAL RULES:
 2. Use inline blanks with __ (double underscores) within cell content.
    - Example: "Morning session starts with __" where __ is the blank
 3. DISTRIBUTE blanks across BOTH column 2 AND column 3. Do NOT put all blanks only in one column.
-4. Answer length MUST VARY - use a MIX of ONE word and TWO word answers:
+4. Answer length MUST VARY - use ONE word, TWO words, or THREE words:
    - Some answers should be exactly 1 word (e.g., "registration")
    - Some answers should be exactly 2 words (e.g., "coffee break")
-   - Maximum allowed is 2 words, but do NOT make all answers the same length
+   - Some answers can be 3 words (e.g., "main conference room")
+   - Maximum allowed is 3 words, but do NOT make all answers the same length
 
 Return ONLY valid JSON in this exact format:
 {
   "dialogue": "Speaker1: Let me explain the schedule...\\nSpeaker2: Yes, please...",
-  "instruction": "Complete the table below. Write NO MORE THAN TWO WORDS for each answer.",
+  "instruction": "Complete the table below. Write NO MORE THAN THREE WORDS for each answer.",
   "table_data": [
     [{"content": "Time", "is_header": true}, {"content": "Activity", "is_header": true}, {"content": "Location", "is_header": true}],
     [{"content": "9:00 AM"}, {"content": "Session starts with __", "has_question": true, "question_number": 1}, {"content": "Main Hall"}],
@@ -1085,7 +1145,7 @@ Return ONLY valid JSON in this exact format:
   ],
   "questions": [
     {"question_number": 1, "question_text": "Activity at 9 AM", "correct_answer": "registration", "explanation": "Speaker mentions registration at 9"},
-    {"question_number": 2, "question_text": "Location at 11 AM", "correct_answer": "conference room", "explanation": "Conference room mentioned for 11 AM"}
+    {"question_number": 2, "question_text": "Location at 11 AM", "correct_answer": "main conference room", "explanation": "Main conference room mentioned for 11 AM"}
   ]
 }`;
 
@@ -1209,11 +1269,13 @@ Return ONLY valid JSON in this exact format:
 
     case 'NOTE_COMPLETION':
       return basePrompt + `2. Create a note completion task with ${questionCount} blanks organized in categories.
+   - IMPORTANT: Vary answer lengths - use ONE word, TWO words, or THREE words
+   - Maximum allowed is 3 words, but do NOT make all answers the same length
 
 Return ONLY valid JSON in this exact format:
 {
   "dialogue": "Speaker1: Let me explain the key points...\\nSpeaker2: Please go ahead...",
-  "instruction": "Complete the notes below. Write NO MORE THAN TWO WORDS for each answer.",
+  "instruction": "Complete the notes below. Write NO MORE THAN THREE WORDS for each answer.",
   "note_sections": [
     {
       "title": "Main Topic",
@@ -1232,24 +1294,26 @@ Return ONLY valid JSON in this exact format:
   "questions": [
     {"question_number": 1, "question_text": "Note 1", "correct_answer": "research methods", "explanation": "Speaker mentions research methods"},
     {"question_number": 2, "question_text": "Note 2", "correct_answer": "practical applications", "explanation": "Related to practical use"},
-    {"question_number": 3, "question_text": "Note 3", "correct_answer": "cost savings", "explanation": "Benefits discussed"}
+    {"question_number": 3, "question_text": "Note 3", "correct_answer": "significant cost savings", "explanation": "Benefits discussed"}
   ]
 }`;
 
     default:
       return basePrompt + `2. Create ${questionCount} fill-in-the-blank questions.
    - Each question MUST include a blank indicated by 2+ underscores (e.g., "_____") where the answer goes.
+   - IMPORTANT: Vary answer lengths - use ONE word, TWO words, or THREE words
+   - Maximum allowed is 3 words, but do NOT make all answers the same length
 
 Return ONLY valid JSON in this exact format:
 {
   "dialogue": "Speaker1: dialogue...\\nSpeaker2: response...",
-  "instruction": "Complete the notes below. Write NO MORE THAN TWO WORDS for each answer.",
+  "instruction": "Complete the notes below. Write NO MORE THAN THREE WORDS for each answer.",
   "questions": [
     {
       "question_number": 1,
       "question_text": "The event takes place in _____.",
-      "correct_answer": "the garden",
-      "explanation": "Speaker mentions the garden location"
+      "correct_answer": "the main garden",
+      "explanation": "Speaker mentions the main garden location"
     }
   ]
 }`;

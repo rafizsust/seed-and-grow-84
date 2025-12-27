@@ -95,10 +95,11 @@ const READING_PASSAGE_PRESETS = {
   long: { paragraphs: 6, label: 'Long (6 paragraphs)' },
 };
 
-// Listening configuration - audio length presets
-const LISTENING_TRANSCRIPT_PRESETS = {
-  standard: { durationSeconds: 240, wordCount: 600, label: 'Standard (4 min)' },
-  full: { durationSeconds: 420, wordCount: 1050, label: 'Full (7 min)' },
+// Listening configuration - audio length settings
+const LISTENING_AUDIO_CONFIG = {
+  minSeconds: 60,   // 1 min
+  maxSeconds: 300,  // 5 min
+  defaultSeconds: 180, // 3 min
 };
 
 // Speaker configuration options (Gemini TTS voices)
@@ -168,8 +169,14 @@ export default function AIPractice() {
   const [customQuestionCount, setCustomQuestionCount] = useState(3);
 
   // Listening-specific configuration
-  const [listeningTranscriptPreset, setListeningTranscriptPreset] = useState<keyof typeof LISTENING_TRANSCRIPT_PRESETS>('standard');
+  const [listeningAudioDuration, setListeningAudioDuration] = useState(LISTENING_AUDIO_CONFIG.defaultSeconds);
   const [listeningQuestionCount, setListeningQuestionCount] = useState(3);
+  
+  // IELTS Part 1 Spelling Mode configuration for Fill-in-Blank
+  const [spellingModeEnabled, setSpellingModeEnabled] = useState(false);
+  const [spellingTestScenario, setSpellingTestScenario] = useState<'phone_call' | 'hotel_booking' | 'job_inquiry'>('phone_call');
+  const [spellingDifficulty, setSpellingDifficulty] = useState<'low' | 'high'>('low');
+  const [numberFormat, setNumberFormat] = useState<'phone_number' | 'date' | 'postcode'>('phone_number');
 
   // Speaker configuration
   const [speaker1Config, setSpeaker1Config] = useState<SpeakerConfig>({
@@ -241,16 +248,24 @@ export default function AIPractice() {
       } : undefined;
 
       // Build listening-specific configuration with speaker settings
+      // Calculate word count from duration (150 words per minute)
+      const estimatedWordCount = Math.round((listeningAudioDuration / 60) * 150);
       const listeningConfig = activeModule === 'listening' ? {
-        transcriptPreset: listeningTranscriptPreset,
-        durationSeconds: LISTENING_TRANSCRIPT_PRESETS[listeningTranscriptPreset].durationSeconds,
-        wordCount: LISTENING_TRANSCRIPT_PRESETS[listeningTranscriptPreset].wordCount,
+        durationSeconds: listeningAudioDuration,
+        wordCount: estimatedWordCount,
         useWordCountMode: false,
         speakerConfig: {
           speaker1: speaker1Config,
           speaker2: needsTwoSpeakers ? speaker2Config : undefined,
           useTwoSpeakers: needsTwoSpeakers,
         },
+        // IELTS Part 1 Spelling Mode settings (only for Fill-in-Blank)
+        spellingMode: listeningQuestionType === 'FILL_IN_BLANK' && spellingModeEnabled ? {
+          enabled: true,
+          testScenario: spellingTestScenario,
+          spellingDifficulty: spellingDifficulty,
+          numberFormat: numberFormat,
+        } : undefined,
       } : undefined;
 
       const { data, error } = await supabase.functions.invoke('generate-ai-practice', {
@@ -366,11 +381,11 @@ export default function AIPractice() {
 
   // Calculate estimated generation time for listening based on audio duration
   const getListeningEstimate = () => {
-    const durationSec = LISTENING_TRANSCRIPT_PRESETS[listeningTranscriptPreset].durationSeconds;
+    const durationSec = listeningAudioDuration;
     
-    if (durationSec <= 120) return { text: '15-30 seconds', seconds: 22 };
-    if (durationSec <= 300) return { text: '30-60 seconds', seconds: 45 };
-    return { text: '60-90 seconds', seconds: 75 };
+    if (durationSec <= 120) return { text: '60-90 seconds', seconds: 75 };
+    if (durationSec <= 180) return { text: '90-150 seconds', seconds: 120 };
+    return { text: '150-240 seconds', seconds: 195 };
   };
 
   // Calculate estimated generation time for reading based on passage length
@@ -744,36 +759,33 @@ export default function AIPractice() {
                     )}
                   </div>
 
-                  {/* Transcript Configuration */}
+                  {/* Audio Length Configuration - Slider */}
                   <div className="space-y-4 border-t pt-6">
-                    <Label className="text-base font-medium flex items-center gap-2">
-                      <Settings2 className="w-4 h-4" />
-                      Audio Length
-                    </Label>
-                    
-                    {/* Preset Selection */}
-                    <RadioGroup 
-                      value={listeningTranscriptPreset} 
-                      onValueChange={(v) => setListeningTranscriptPreset(v as keyof typeof LISTENING_TRANSCRIPT_PRESETS)}
-                      className="grid grid-cols-2 gap-3"
-                    >
-                      {Object.entries(LISTENING_TRANSCRIPT_PRESETS).map(([key, preset]) => (
-                        <div key={key} className="flex items-center space-x-2">
-                          <RadioGroupItem value={key} id={`listening-preset-${key}`} />
-                          <Label 
-                            htmlFor={`listening-preset-${key}`} 
-                            className="cursor-pointer text-sm"
-                          >
-                            {preset.label}
-                          </Label>
-                        </div>
-                      ))}
-                    </RadioGroup>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-base font-medium flex items-center gap-2">
+                        <Settings2 className="w-4 h-4" />
+                        Audio Length
+                      </Label>
+                      <span className="text-sm font-medium">{Math.floor(listeningAudioDuration / 60)} min {listeningAudioDuration % 60 > 0 ? `${listeningAudioDuration % 60}s` : ''}</span>
+                    </div>
+                    <Slider
+                      value={[listeningAudioDuration]}
+                      onValueChange={([v]) => setListeningAudioDuration(v)}
+                      min={LISTENING_AUDIO_CONFIG.minSeconds}
+                      max={LISTENING_AUDIO_CONFIG.maxSeconds}
+                      step={30}
+                      className="w-full"
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>1 min</span>
+                      <span>3 min (Default)</span>
+                      <span>5 min</span>
+                    </div>
 
                     {/* Estimated Generation Time */}
                     {(() => {
-                      const durationSec = LISTENING_TRANSCRIPT_PRESETS[listeningTranscriptPreset].durationSeconds;
-                      const estimatedGenTime = durationSec <= 120 ? '15-30' : durationSec <= 300 ? '30-60' : '60-90';
+                      const durationSec = listeningAudioDuration;
+                      const estimatedGenTime = durationSec <= 120 ? '60-90' : durationSec <= 180 ? '90-150' : '150-240';
                       return (
                         <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
                           <Clock className="w-4 h-4 text-primary" />
@@ -785,6 +797,72 @@ export default function AIPractice() {
                       );
                     })()}
                   </div>
+
+                  {/* IELTS Part 1 Spelling Mode - Only for Fill-in-Blank */}
+                  {listeningQuestionType === 'FILL_IN_BLANK' && (
+                    <div className="space-y-4 border-t pt-6">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-base font-medium flex items-center gap-2">
+                          <Sparkles className="w-4 h-4" />
+                          Spelling Mode (IELTS Part 1 Style)
+                        </Label>
+                        <div 
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${spellingModeEnabled ? 'bg-primary' : 'bg-muted'}`}
+                          onClick={() => setSpellingModeEnabled(!spellingModeEnabled)}
+                        >
+                          <span 
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${spellingModeEnabled ? 'translate-x-6' : 'translate-x-1'}`}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Include name/number spelling in dialogues (e.g., "S-H-A-R-M-A", "double seven, five, nine")
+                      </p>
+                      
+                      {spellingModeEnabled && (
+                        <div className="space-y-4 p-4 rounded-lg border bg-card">
+                          <div className="space-y-2">
+                            <Label className="text-xs text-muted-foreground">Test Scenario</Label>
+                            <Select value={spellingTestScenario} onValueChange={(v: 'phone_call' | 'hotel_booking' | 'job_inquiry') => setSpellingTestScenario(v)}>
+                              <SelectTrigger className="h-9">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="phone_call">Phone Call</SelectItem>
+                                <SelectItem value="hotel_booking">Hotel Booking</SelectItem>
+                                <SelectItem value="job_inquiry">Job Inquiry</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-xs text-muted-foreground">Spelling Difficulty</Label>
+                            <Select value={spellingDifficulty} onValueChange={(v: 'low' | 'high') => setSpellingDifficulty(v)}>
+                              <SelectTrigger className="h-9">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="low">Low (Common names)</SelectItem>
+                                <SelectItem value="high">High (Unusual names)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-xs text-muted-foreground">Number Format</Label>
+                            <Select value={numberFormat} onValueChange={(v: 'phone_number' | 'date' | 'postcode') => setNumberFormat(v)}>
+                              <SelectTrigger className="h-9">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="phone_number">Phone Number</SelectItem>
+                                <SelectItem value="date">Date</SelectItem>
+                                <SelectItem value="postcode">Postcode</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Question Count */}
                   <div className="space-y-3">
@@ -954,34 +1032,36 @@ export default function AIPractice() {
                 </p>
               </div>
 
-              {/* Time Setting */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label className="text-base font-medium flex items-center gap-2">
-                    <Clock className="w-4 h-4" />
-                    Time Limit
-                  </Label>
-                  <span className="font-medium">{timeMinutes} minutes</span>
+              {/* Time Setting - Hidden for Listening (audio length determines time) */}
+              {activeModule !== 'listening' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-base font-medium flex items-center gap-2">
+                      <Clock className="w-4 h-4" />
+                      Time Limit
+                    </Label>
+                    <span className="font-medium">{timeMinutes} minutes</span>
+                  </div>
+                  <Slider
+                    value={[timeMinutes]}
+                    onValueChange={([v]) => setTimeMinutes(v)}
+                    min={2}
+                    max={activeModule === 'reading' ? 20 : 10}
+                    step={activeModule === 'reading' ? 2 : 1}
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>2 min</span>
+                    <span>
+                      {activeModule === 'reading' 
+                        ? `Recommended: ${Math.ceil(customQuestionCount * 2)} min`
+                        : `Recommended: ${Math.min(10, getDefaultTime(questionCount))} min`
+                      }
+                    </span>
+                    <span>{activeModule === 'reading' ? '20 min' : '10 min'}</span>
+                  </div>
                 </div>
-                <Slider
-                  value={[timeMinutes]}
-                  onValueChange={([v]) => setTimeMinutes(v)}
-                  min={2}
-                  max={activeModule === 'reading' ? 20 : 10}
-                  step={activeModule === 'reading' ? 2 : 1}
-                  className="w-full"
-                />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>2 min</span>
-                  <span>
-                    {activeModule === 'reading' 
-                      ? `Recommended: ${Math.ceil(customQuestionCount * 2)} min`
-                      : `Recommended: ${Math.min(10, getDefaultTime(questionCount))} min`
-                    }
-                  </span>
-                  <span>{activeModule === 'reading' ? '20 min' : '10 min'}</span>
-                </div>
-              </div>
+              )}
             </CardContent>
           </Card>
 
@@ -992,7 +1072,7 @@ export default function AIPractice() {
                 <div className="text-center sm:text-left">
                   <h3 className="font-bold text-lg mb-1">Ready to Practice?</h3>
                   <p className="text-muted-foreground">
-                    {questionCount} {currentQuestionType.replace(/_/g, ' ').toLowerCase()} questions • {timeMinutes} minutes • {difficulty} difficulty
+                    {questionCount} {currentQuestionType.replace(/_/g, ' ').toLowerCase()} questions • {activeModule === 'listening' ? `${Math.floor(listeningAudioDuration / 60)} min audio` : `${timeMinutes} minutes`} • {difficulty} difficulty
                   </p>
                 </div>
                 <Button 
