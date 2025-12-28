@@ -11,6 +11,7 @@ import {
   NoteCompletion,
   SummaryWordBank,
 } from './questions';
+import { MapLabelingTable } from './questions/MapLabelingTable';
 import { MatchingFeatures } from './questions/MatchingFeatures';
 import { MatchingInformation } from './questions/MatchingInformation';
 import { ReadingTableCompletion } from './questions/ReadingTableCompletion';
@@ -881,7 +882,7 @@ export function ReadingQuestions({
                     );
                   })()
                 ) : type === 'MAP_LABELING' ? (
-                  /* Map Labeling with drag & drop */
+                  /* Map Labeling - Table format for AI-generated, Drag & Drop for admin-created */
                   (() => {
                     const groupData = getQuestionGroupOptions 
                       ? getQuestionGroupOptions(firstQuestionInGroup.question_group_id || null)
@@ -890,29 +891,46 @@ export function ReadingQuestions({
                     const groupOptions = (groupData?.options || {}) as any;
 
                     const imageUrl = groupOptions?.imageUrl || groupOptions?.image_url || '';
-
-                    // Preferred format
-                    let dropZones = Array.isArray(groupOptions?.dropZones) ? groupOptions.dropZones : [];
-                    let optionsList = Array.isArray(groupOptions?.options) ? groupOptions.options : [];
-
-                    // Back-compat for AI practice payloads
-                    if (dropZones.length === 0 && Array.isArray(groupOptions?.map_labels)) {
-                      // Create deterministic placeholder drop zones (until generator provides real coordinates)
-                      const startX = 22;
-                      const startY = 18;
-                      const colGap = 30;
-                      const rowGap = 16;
-                      dropZones = typeQuestions.map((q, idx) => ({
-                        questionNumber: q.question_number,
-                        xPercent: startX + (idx % 2) * colGap,
-                        yPercent: startY + Math.floor(idx / 2) * rowGap,
+                    
+                    // Check for AI-generated format with map_labels (use table-based selection)
+                    if (Array.isArray(groupOptions?.map_labels) && groupOptions.map_labels.length > 0) {
+                      // AI-generated: Use MapLabelingTable with radio button selection
+                      const mapLabels = groupOptions.map_labels.map((l: any) => ({
+                        id: String(l?.id ?? ''),
+                        text: String(l?.text ?? l?.id ?? ''),
+                      }));
+                      
+                      const landmarks = Array.isArray(groupOptions?.landmarks) 
+                        ? groupOptions.landmarks.map((l: any) => ({
+                            id: String(l?.id ?? ''),
+                            text: String(l?.text ?? ''),
+                          }))
+                        : [];
+                      
+                      const mapQuestions = typeQuestions.map(q => ({
+                        question_number: q.question_number,
+                        question_text: q.question_text,
+                        correct_answer: q.correct_answer,
                       }));
 
-                      // Default options are label letters (A, B, C...)
-                      optionsList = groupOptions.map_labels
-                        .map((l: any) => String(l?.id ?? l))
-                        .filter(Boolean);
+                      return (
+                        <MapLabelingTable
+                          mapDescription={groupOptions?.map_description}
+                          mapLabels={mapLabels}
+                          landmarks={landmarks}
+                          questions={mapQuestions}
+                          answers={answers}
+                          onAnswerChange={onAnswerChange}
+                          onQuestionFocus={setCurrentQuestion}
+                          fontSize={fontSize}
+                          imageUrl={imageUrl}
+                        />
+                      );
                     }
+
+                    // Admin-created: Use drag & drop MapLabeling
+                    let dropZones = Array.isArray(groupOptions?.dropZones) ? groupOptions.dropZones : [];
+                    let optionsList = Array.isArray(groupOptions?.options) ? groupOptions.options : [];
 
                     const maxImageWidth = groupOptions?.maxImageWidth || null;
                     const maxImageHeight = groupOptions?.maxImageHeight || null;
