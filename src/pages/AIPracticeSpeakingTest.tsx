@@ -7,7 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { loadGeneratedTestAsync, GeneratedTest } from '@/types/aiPractice';
 import { useToast } from '@/hooks/use-toast';
 
-import { useGeminiLiveAudio } from '@/hooks/useGeminiLiveAudio';
+import { useGeminiSpeaking } from '@/hooks/useGeminiSpeaking';
 import { AIExaminerAvatar } from '@/components/speaking/AIExaminerAvatar';
 import { TestStartOverlay } from '@/components/common/TestStartOverlay';
 import { supabase } from '@/integrations/supabase/client';
@@ -98,15 +98,32 @@ export default function AIPracticeSpeakingTest() {
   const testStartTimeRef = useRef<number>(Date.now());
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Gemini Live Audio Hook
-  const gemini = useGeminiLiveAudio({
+  // Gemini Speaking Hook (REST + Browser Speech APIs)
+  const gemini = useGeminiSpeaking({
     partType: 'FULL_TEST',
     difficulty: test?.difficulty || 'medium',
     topic: test?.topic,
-    onTranscriptReceived: (text) => {
-      if (text) {
-        console.log('AI transcript:', text);
+    onUserTranscript: (text, isFinal) => {
+      if (isFinal && text) {
+        console.log('User transcript:', text);
+        // Update current part transcript
+        setPartRecordings(prev => {
+          const current = prev[currentPart];
+          if (current) {
+            return {
+              ...prev,
+              [currentPart]: {
+                ...current,
+                transcript: current.transcript + ' ' + text
+              }
+            };
+          }
+          return prev;
+        });
       }
+    },
+    onAIResponse: (text) => {
+      console.log('AI response:', text);
     },
     onError: (error) => {
       console.error('Gemini error:', error);

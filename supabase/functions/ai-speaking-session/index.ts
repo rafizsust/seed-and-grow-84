@@ -34,7 +34,7 @@ async function decryptApiKey(encryptedValue: string, encryptionKey: string): Pro
   return decoder.decode(decryptedData);
 }
 
-// Generate ephemeral token for Gemini Live API
+// Generate session config for Gemini Speaking API
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -91,42 +91,19 @@ serve(async (req) => {
 
     const geminiApiKey = await decryptApiKey(userSecret.encrypted_value, appEncryptionKey);
 
-    const { partType, difficulty, topic, voiceName } = await req.json();
+    const { partType, difficulty, topic } = await req.json();
 
     // Build system instruction for IELTS examiner with British accent personality
-    const examinerInstruction = buildExaminerInstruction(partType, difficulty, topic);
+    const systemInstruction = buildExaminerInstruction(partType, difficulty, topic);
 
-    // Validate voice selection (default to Puck if invalid)
-    const validVoices = ['Puck', 'Charon', 'Kore', 'Aoede', 'Fenrir', 'Leda', 'Zephyr', 'Iapetus', 'Orus'];
-    const selectedVoice = validVoices.includes(voiceName) ? voiceName : 'Puck';
+    console.log('REST session created for user:', user.id);
 
-    // For Gemini Live API, we need to use a model that supports bidiGenerateContent
-    // gemini-2.0-flash-exp is the model that supports the Live API with audio output
-    const sessionConfig = {
-      model: 'models/gemini-2.0-flash-exp',
-      generationConfig: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: selectedVoice
-            }
-          }
-        }
-      },
-      systemInstruction: {
-        parts: [{ text: examinerInstruction }]
-      }
-    };
-
-    console.log('Session created for user:', user.id, 'with voice:', selectedVoice);
-
-    // Return the session configuration for client-side WebSocket connection
+    // Return the session configuration for REST API calls
     return new Response(JSON.stringify({
       success: true,
-      sessionConfig,
       apiKey: geminiApiKey, // User's own decrypted API key
-      wsEndpoint: 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent'
+      systemInstruction,
+      model: 'gemini-2.5-flash' // Stable model that works on free tier
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -154,10 +131,11 @@ function buildExaminerInstruction(partType: string, difficulty: string, topic?: 
   const baseInstruction = `You are an official IELTS Speaking Examiner with a neutral British accent. Your role is to conduct a professional IELTS Speaking test following the official 2025 format precisely.
 
 PERSONALITY & VOICE:
-- Speak with a clear, professional British accent
+- Speak with a clear, professional British manner
 - Be warm but formal, like a real IELTS examiner
 - Use natural intonation and appropriate pauses
 - Never rush the candidate
+- Keep responses concise and examiner-appropriate (don't give long speeches)
 
 EXAMINATION RULES:
 - Always start with a formal greeting and identity check
@@ -173,9 +151,9 @@ ${difficultyGuide[difficulty as keyof typeof difficultyGuide] || difficultyGuide
 ${topic ? `TOPIC FOCUS: The test should relate to the topic of "${topic}" where appropriate.` : ''}
 
 PART 1 STRUCTURE (4-5 minutes):
-- Start: "Good morning/afternoon. My name is [examiner]. Could you tell me your full name, please?"
+- Start: "Good morning/afternoon. My name is the IELTS examiner. Could you tell me your full name, please?"
 - Follow with: "And what should I call you?"
-- Then: "Can I see your identification, please?" (wait 2 seconds, then) "Thank you."
+- Then: "Can I see your identification, please?" (wait for response, then) "Thank you."
 - Ask 3-4 questions on first topic (familiar topics: home, work, studies, hobbies)
 - Ask 3-4 questions on second topic
 
@@ -185,13 +163,25 @@ PART 2 STRUCTURE (3-4 minutes):
 - At 2 minutes: "Thank you." Then ask 1-2 rounding-off questions
 
 PART 3 STRUCTURE (4-5 minutes):
-- Transition: "We've been talking about [Part 2 topic], and I'd like to discuss some related questions."
+- Transition: "We've been talking about the Part 2 topic, and I'd like to discuss some related questions."
 - Ask 4-6 abstract, discussion-type questions related to the Part 2 topic
 - Use follow-up prompts: "Why do you think that is?" "Can you give an example?"
 
-BARGE-IN SUPPORT:
-- If the candidate interrupts, pause and listen
-- Acknowledge their input naturally before continuing`;
+EVALUATION CRITERIA (Apply strictly):
+- Fluency and Coherence: Natural flow, logical organization, appropriate connectors
+- Lexical Resource: Range and precision of vocabulary, collocations, idiomatic language
+- Grammatical Range and Accuracy: Sentence variety, tense accuracy, complex structures
+- Pronunciation: Clear articulation, natural intonation, appropriate stress patterns
+
+WORD LIMIT ENFORCEMENT:
+- When giving instructions that specify word limits (e.g., "ONE WORD ONLY"), strictly evaluate candidate responses
+- Flag answers that exceed the specified word limit in your mental notes
+- This affects the Lexical Resource and Task Achievement components of their score
+
+RESPONSE FORMAT:
+- Keep your spoken responses natural and examiner-like
+- Don't include stage directions or annotations in your speech
+- Respond as you would in a real IELTS speaking test`;
 
   return baseInstruction;
 }
