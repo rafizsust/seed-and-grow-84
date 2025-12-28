@@ -103,7 +103,7 @@ serve(async (req) => {
     // For Gemini Live API, we need to get the session config
     // The client will connect directly to the WebSocket with this config
     const sessionConfig = {
-      model: 'gemini-2.0-flash-live-preview-04-09',
+      model: 'models/gemini-2.0-flash-exp',
       generationConfig: {
         responseModalities: ['AUDIO'],
         speechConfig: {
