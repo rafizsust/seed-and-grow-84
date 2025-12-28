@@ -394,10 +394,10 @@ export default function AIPracticeSpeakingTest() {
     } else if (currentPhase === 'part2_prep') {
       // Start Part 2 recording after TTS completes (either prep-over or early start message)
       setPhase('part2_recording');
-      setTimeLeft(TIMING.PART2_SPEAK);
       part2SpeakStartRef.current = Date.now();
       startRecording();
-      startRecording();
+      // Set timeLeft AFTER starting recording to ensure timer effect triggers
+      setTimeout(() => setTimeLeft(TIMING.PART2_SPEAK), 0);
     } else if (currentPhase === 'part2_transition') {
       // Start Part 3
       startPart3();
@@ -486,8 +486,14 @@ export default function AIPracticeSpeakingTest() {
     loadTest();
   }, [testId, navigate, toast]);
 
-  // Timer effect
+  // Timer effect - use timeLeft as dependency to restart when set to new value
   useEffect(() => {
+    // Clear any existing timer first
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
     if (timeLeft <= 0) return;
 
     timerRef.current = setInterval(() => {
@@ -502,9 +508,12 @@ export default function AIPracticeSpeakingTest() {
     }, 1000);
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
     };
-  }, [timeLeft > 0]); // Only restart when going from 0 to non-zero
+  }, [timeLeft]); // Trigger on any timeLeft change
 
   // Start test function
   const startTest = () => {
