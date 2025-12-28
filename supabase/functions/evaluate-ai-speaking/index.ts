@@ -221,7 +221,7 @@ serve(async (req) => {
       score: Math.round((evaluation.overallBand / 9) * 100),
       total_questions: partAudios.length,
       band_score: evaluation.overallBand,
-      time_spent_seconds: partAudios.reduce((acc, p) => acc + p.duration, 0),
+      time_spent_seconds: Math.round(partAudios.reduce((acc, p) => acc + p.duration, 0)),
       question_results: evaluation,
       completed_at: new Date().toISOString(),
     });
