@@ -189,7 +189,11 @@ function extractJsonFromResponse(text: string): string {
 }
 
 // Generate map image using Gemini (via Lovable AI Gateway)
-async function generateMapImage(mapDescription: string, mapLabels: Array<{id: string; text: string}>): Promise<string | null> {
+async function generateMapImage(
+  mapDescription: string, 
+  mapLabels: Array<{id: string; text: string}>,
+  landmarks?: Array<{id: string; text: string}>
+): Promise<string | null> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   if (!LOVABLE_API_KEY) {
     console.error('LOVABLE_API_KEY not configured');
@@ -199,13 +203,23 @@ async function generateMapImage(mapDescription: string, mapLabels: Array<{id: st
   try {
     console.log('Generating map image with Gemini image model...');
 
-    // Build a detailed prompt for map generation
-    const labelsList = mapLabels.map(l => `${l.id}: ${l.text}`).join(', ');
-    const imagePrompt = `Create a simple, clean map diagram for an IELTS listening test. 
+    // Build lists for the prompt
+    // Answer positions: show ONLY the letter (e.g., "A", "B") - NO text labels
+    const answerPositions = mapLabels.map(l => l.id).join(', ');
+    // Landmarks: show with text labels (e.g., "Bank", "Gift Shop")
+    const landmarksList = landmarks?.map(l => `${l.text}`).join(', ') || 'streets and pathways';
+    
+    const imagePrompt = `Create a simple, clean map diagram for an IELTS listening test.
 The map shows: ${mapDescription}
-Include these labeled locations: ${labelsList}
-Style: Top-down view, simple line art with clear labels (A, B, C, etc.), easy to read, educational diagram style.
-Make it look like a professional test map with clear pathways and building outlines.`;
+
+CRITICAL INSTRUCTIONS:
+- Show letter circles (${answerPositions}) at various positions on the map - these are ANSWER POSITIONS that are NOT labeled with names
+- Show these LABELED reference points that students can use to navigate: ${landmarksList}
+- The letter circles should just show the letter (A, B, C, etc.) with NO text label next to them
+- Include a compass showing N, S, E, W in the top-right corner
+- Style: Top-down view, simple line art, educational diagram style like official IELTS test maps
+- Make it look professional with clear pathways, streets, and building outlines
+- The reference landmarks should have their names visible on the map`;
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -1494,26 +1508,40 @@ Return ONLY valid JSON (no markdown code blocks) in this exact format:
     case 'MAP_LABELING':
       return basePrompt + `2. Create a map labeling task with ${questionCount} locations to identify.
 
-IMPORTANT: The correct_answer for each question MUST be the location NAME (e.g., "Library"), NOT the letter (e.g., "A").
-The map_labels provide the letter-to-name mapping. Questions ask about locations and users drag location names to drop zones.
+OFFICIAL IELTS FORMAT - IMPORTANT:
+- The map has letter positions A-H that are answer options (shown as circles on the map, NOT labeled with names)
+- The map also has LANDMARKS that ARE labeled (e.g., "Main Street", "Gift Shop", "Bank") as reference points
+- Questions show the LOCATION NAME the user needs to find (e.g., "Quilt Shop", "Museum")
+- The correct_answer is the LETTER (A, B, C, etc.) where that location is on the map
+- In the audio dialogue, describe locations by their RELATIVE POSITION to landmarks (e.g., "The museum is on the corner of Oak Street and Main Street" or "It's directly opposite the bank")
+
+map_labels: These are the answer positions (A-H). Do NOT include the location name - the user must figure out which letter matches which location from the audio.
+landmarks: These are labeled reference points on the map that help navigation (streets, existing buildings with names visible).
 
 Return ONLY valid JSON (no markdown code blocks) in this exact format:
 {
-  "dialogue": "Speaker1: Let me show you around the campus...\\nSpeaker2: Great, where is everything?...",
-  "speaker_names": {"Speaker1": "Campus Guide", "Speaker2": "New Student"},
-  "instruction": "Label the map below. Drag the correct location name to each numbered position.",
-  "map_description": "A campus map showing: Library (A), Science Building (B), Sports Center (C), Cafeteria (D), Administration (E), Parking (F)",
+  "dialogue": "Guide: Welcome to the historic district. Let me show you around.\\nVisitor: Great, I'm interested in the craft shops.\\nGuide: Well, there's a wonderful quilt shop. It's on Ash Street, right next to the bank. You can't miss it - it's the building marked A on your map.\\nVisitor: And what about the museum?\\nGuide: The Handicrafts Museum is on Oak Street. It's directly opposite the cafe, that's position B on the map.\\nGuide: If you're looking for the school house, it's further down Main Street past the gift shop, at position C.",
+  "speaker_names": {"Guide": "Tour Guide", "Visitor": "Tourist"},
+  "instruction": "Label the map. Choose the correct letter, A-H, for each label.",
+  "map_description": "A street map with Oak Street at the top, Ash Street in the middle, and Elm Street at the bottom. Main Street runs vertically on the left, Maple Street on the right.",
   "map_labels": [
-    {"id": "A", "text": "Library"},
-    {"id": "B", "text": "Science Building"},
-    {"id": "C", "text": "Sports Center"},
-    {"id": "D", "text": "Cafeteria"},
-    {"id": "E", "text": "Administration"},
-    {"id": "F", "text": "Parking"}
+    {"id": "A", "text": "Quilt Shop"},
+    {"id": "B", "text": "Handicrafts Museum"},
+    {"id": "C", "text": "School House"},
+    {"id": "D", "text": "Antique Store"},
+    {"id": "E", "text": "Art Gallery"},
+    {"id": "F", "text": "Bookshop"}
+  ],
+  "landmarks": [
+    {"id": "L1", "text": "Bank"},
+    {"id": "L2", "text": "Cafe"},
+    {"id": "L3", "text": "Gift Shop"},
+    {"id": "L4", "text": "Welcome Center"}
   ],
   "questions": [
-    {"question_number": 1, "question_text": "Where can students borrow books?", "correct_answer": "Library", "explanation": "The library is mentioned for books"},
-    {"question_number": 2, "question_text": "Where are sports facilities?", "correct_answer": "Sports Center", "explanation": "Sports Center has the facilities"}
+    {"question_number": 1, "question_text": "Quilt Shop", "correct_answer": "A", "explanation": "Guide says it's next to the bank on Ash Street, position A"},
+    {"question_number": 2, "question_text": "Handicrafts Museum", "correct_answer": "B", "explanation": "Guide says it's opposite the cafe on Oak Street, position B"},
+    {"question_number": 3, "question_text": "School House", "correct_answer": "C", "explanation": "Guide says it's past the gift shop on Main Street, position C"}
   ]
 }`;
 
@@ -1889,7 +1917,7 @@ serve(async (req) => {
         let mapImageUrl: string | undefined;
         if (parsed.map_description && parsed.map_labels) {
           console.log('Generating map image for MAP_LABELING...');
-          const mapImageData = await generateMapImage(parsed.map_description, parsed.map_labels);
+          const mapImageData = await generateMapImage(parsed.map_description, parsed.map_labels, parsed.landmarks);
           if (mapImageData) {
             const uploadedUrl = await uploadGeneratedImage(supabaseClient, mapImageData, testId, 'ai-practice-maps');
             if (uploadedUrl) {
@@ -1900,18 +1928,12 @@ serve(async (req) => {
         
         groupOptions = {
           map_description: parsed.map_description,
-          map_labels: parsed.map_labels,
+          map_labels: parsed.map_labels, // Answer positions A-H (shown as circles only)
+          landmarks: parsed.landmarks || [], // Reference landmarks with text labels
           imageUrl: mapImageUrl,
-          // Add drop zones based on questions for visual placement
-          // MapLabeling component expects xPercent and yPercent (0-100)
-          dropZones: (parsed.questions || []).map((q: any, idx: number) => ({
-            id: `zone-${q.question_number || idx + 1}`,
-            questionNumber: q.question_number || idx + 1,
-            xPercent: 15 + (idx % 3) * 30, // Distribute across map (15%, 45%, 75%)
-            yPercent: 20 + Math.floor(idx / 3) * 25, // Distribute vertically (20%, 45%, 70%)
-          })),
-          // Options should be the location names from map_labels for drag and drop
-          options: parsed.map_labels?.map((l: any) => l.text) || [],
+          // Drop zones not needed for table-based UI, but keep for compatibility
+          dropZones: [],
+          options: [], // Not used for table-based selection
         };
       } else if (questionType === 'NOTE_COMPLETION' && parsed.note_sections) {
         // Map note_sections to noteCategories format expected by NoteStyleFillInBlank

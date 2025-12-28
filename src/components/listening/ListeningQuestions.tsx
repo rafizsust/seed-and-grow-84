@@ -259,6 +259,7 @@ export function ListeningQuestions({
                 <MapLabelingTable
                   mapDescription={group.options.map_description}
                   mapLabels={group.options.map_labels}
+                  landmarks={group.options.landmarks}
                   questions={groupQuestions.map(q => ({
                     question_number: q.question_number,
                     question_text: q.question_text,
