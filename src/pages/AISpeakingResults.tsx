@@ -89,6 +89,63 @@ interface SpeakingResult {
   created_at: string;
 }
 
+function normalizeEvaluationReport(raw: any): EvaluationReport {
+  const toNumber = (v: any, fallback = 0) => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string') {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    }
+    return fallback;
+  };
+
+  const asArray = <T,>(v: any): T[] => (Array.isArray(v) ? v : []);
+
+  const normalizeCriterion = (v: any): CriterionScore => ({
+    score: toNumber(v?.score, 0),
+    strengths: asArray<string>(v?.strengths),
+    weaknesses: asArray<string>(v?.weaknesses ?? v?.errors),
+    suggestions: asArray<string>(v?.suggestions ?? v?.notes),
+  });
+
+  const overallBand = toNumber(raw?.overall_band ?? raw?.overallBand, 0);
+
+  const lexicalUpgrades = (() => {
+    const direct = raw?.lexical_upgrades;
+    if (Array.isArray(direct)) return direct as LexicalUpgrade[];
+
+    const lr = raw?.lexical_resource ?? raw?.lexicalResource;
+    const nested = lr?.lexicalUpgrades ?? lr?.lexical_upgrades;
+    return asArray<LexicalUpgrade>(nested);
+  })();
+
+  const partAnalysis = (() => {
+    if (Array.isArray(raw?.part_analysis)) return raw.part_analysis as PartAnalysis[];
+
+    const camel = asArray<any>(raw?.partAnalysis);
+    return camel.map((p) => ({
+      part_number: toNumber(p?.partNumber ?? p?.part_number, 0),
+      performance_notes: '',
+      key_moments: asArray<string>(p?.strengths),
+      areas_for_improvement: asArray<string>(p?.improvements),
+    })) as PartAnalysis[];
+  })();
+
+  return {
+    overall_band: overallBand,
+    fluency_coherence: normalizeCriterion(raw?.fluency_coherence ?? raw?.fluencyCoherence),
+    lexical_resource: normalizeCriterion(raw?.lexical_resource ?? raw?.lexicalResource),
+    grammatical_range: normalizeCriterion(raw?.grammatical_range ?? raw?.grammaticalRange),
+    pronunciation: normalizeCriterion(raw?.pronunciation),
+    lexical_upgrades: lexicalUpgrades,
+    part_analysis: partAnalysis,
+    improvement_priorities: asArray<string>(raw?.improvement_priorities ?? raw?.priorityImprovements),
+    strengths_to_maintain: asArray<string>(raw?.strengths_to_maintain ?? raw?.keyStrengths),
+    examiner_notes: String(raw?.examiner_notes ?? raw?.summary ?? ''),
+    modelAnswers: asArray<ModelAnswer>(raw?.modelAnswers ?? raw?.model_answers),
+  };
+}
+
 export default function AISpeakingResults() {
   const { testId } = useParams<{ testId: string }>();
   const navigate = useNavigate();
@@ -138,12 +195,12 @@ export default function AISpeakingResults() {
         return;
       }
 
-      const report = data.question_results as unknown as EvaluationReport;
-      
+      const report = normalizeEvaluationReport(data.question_results);
+
       setResult({
         id: data.id,
         test_id: data.test_id,
-        overall_band: data.band_score || 0,
+        overall_band: data.band_score || report.overall_band || 0,
         evaluation_report: report,
         audio_urls: (data.answers as Record<string, string>) || {},
         created_at: data.completed_at,

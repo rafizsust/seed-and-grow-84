@@ -255,7 +255,7 @@ export default function AIPracticeSpeakingTest() {
       setPhase('done');
       
       // Navigate to results
-      navigate(`/ai-practice/results/${testId}?module=speaking`);
+      navigate(`/ai-practice/speaking/results/${testId}`);
     } catch (err) {
       console.error('Submission error:', err);
       toast({

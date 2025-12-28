@@ -81,6 +81,13 @@ export default function AIPracticeResults() {
       return;
     }
 
+    // Back-compat: older speaking flow routed through the generic results page
+    const moduleParam = new URLSearchParams(window.location.search).get('module');
+    if (moduleParam === 'speaking') {
+      navigate(`/ai-practice/speaking/results/${testId}`, { replace: true });
+      return;
+    }
+
     if (authLoading) return;
 
     if (!user) {
