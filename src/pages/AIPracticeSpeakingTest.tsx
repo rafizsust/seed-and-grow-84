@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -8,6 +8,7 @@ import { loadGeneratedTestAsync, GeneratedTest } from '@/types/aiPractice';
 import { useToast } from '@/hooks/use-toast';
 import { useSpeechSynthesis } from '@/hooks/useSpeechSynthesis';
 import { TestStartOverlay } from '@/components/common/TestStartOverlay';
+import { AILoadingScreen } from '@/components/common/AILoadingScreen';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Clock,
@@ -85,6 +86,11 @@ export default function AIPracticeSpeakingTest() {
 
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
+
+  // Background evaluation state
+  const [partEvaluations, setPartEvaluations] = useState<Record<number, any>>({});
+  const [evaluatingParts, setEvaluatingParts] = useState<Set<number>>(new Set());
+  const [evaluationStep, setEvaluationStep] = useState(0);
 
   const [recordings, setRecordings] = useState<Record<number, PartRecordingMeta>>({
     1: { startTime: 0 },
@@ -304,8 +310,87 @@ export default function AIPracticeSpeakingTest() {
     speakText('Thank you. That is the end of the speaking test.');
   };
 
+  // Function to send a part for background evaluation
+  const evaluatePartInBackground = useCallback(async (partNum: 1 | 2 | 3) => {
+    const segments = audioSegmentsRef.current;
+    const parts = speakingPartsRef.current;
+    const part = parts[`part${partNum}` as keyof typeof parts];
+    
+    if (!part || !testId) return;
+
+    // Get audio segments for this part
+    const partAudioData: Record<string, string> = {};
+    const partDurations: Record<string, number> = {};
+    const partKeys = Object.keys(segments).filter(k => k.startsWith(`part${partNum}-`));
+    
+    if (partKeys.length === 0) {
+      console.log(`[AIPracticeSpeakingTest] No audio segments for Part ${partNum}, skipping background evaluation`);
+      return;
+    }
+
+    setEvaluatingParts(prev => new Set([...prev, partNum]));
+    console.log(`[AIPracticeSpeakingTest] Starting background evaluation for Part ${partNum}`);
+
+    try {
+      for (const key of partKeys) {
+        const seg = segments[key];
+        const blob = new Blob(seg.chunks, { type: 'audio/webm' });
+        partDurations[key] = seg.duration;
+
+        if (blob.size < 512) continue;
+
+        const dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(String(reader.result));
+          reader.readAsDataURL(blob);
+        });
+
+        partAudioData[key] = dataUrl;
+      }
+
+      if (Object.keys(partAudioData).length === 0) {
+        console.log(`[AIPracticeSpeakingTest] No valid audio for Part ${partNum}`);
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke('evaluate-ai-speaking-part', {
+        body: {
+          testId,
+          partNumber: partNum,
+          audioData: partAudioData,
+          durations: partDurations,
+          questions: part.questions || [],
+          cueCardTopic: partNum === 2 ? (part as any).cue_card_topic : undefined,
+          cueCardContent: partNum === 2 ? (part as any).cue_card_content : undefined,
+          instruction: part.instruction,
+          topic: test?.topic,
+          difficulty: test?.difficulty,
+        },
+      });
+
+      if (error) {
+        console.error(`[AIPracticeSpeakingTest] Background evaluation error for Part ${partNum}:`, error);
+      } else if (data?.partResult) {
+        console.log(`[AIPracticeSpeakingTest] Part ${partNum} evaluation complete`);
+        setPartEvaluations(prev => ({
+          ...prev,
+          [partNum]: data.partResult,
+        }));
+      }
+    } catch (err) {
+      console.error(`[AIPracticeSpeakingTest] Error evaluating Part ${partNum}:`, err);
+    } finally {
+      setEvaluatingParts(prev => {
+        const next = new Set(prev);
+        next.delete(partNum);
+        return next;
+      });
+    }
+  }, [testId, test]);
+
   const submitTest = async () => {
     setPhase('submitting');
+    setEvaluationStep(0);
 
     try {
       const segments = audioSegmentsRef.current;
@@ -320,6 +405,20 @@ export default function AIPracticeSpeakingTest() {
         setPhase('done');
         return;
       }
+
+      // Wait for any pending part evaluations
+      if (evaluatingParts.size > 0) {
+        setEvaluationStep(1);
+        console.log('[AIPracticeSpeakingTest] Waiting for pending part evaluations...');
+        // Wait up to 30 seconds for pending evaluations
+        const maxWait = 30000;
+        const startWait = Date.now();
+        while (evaluatingParts.size > 0 && Date.now() - startWait < maxWait) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+
+      setEvaluationStep(2);
 
       // Convert segments to data URLs (send per-question audio)
       const audioData: Record<string, string> = {};
@@ -349,7 +448,9 @@ export default function AIPracticeSpeakingTest() {
 
       const fluencyFlag = part2Duration > 0 && part2Duration < PART2_MIN_SPEAKING;
 
+      setEvaluationStep(3);
       console.log(`[AIPracticeSpeakingTest] Submitting ${Object.keys(audioData).length} audio segments`);
+      console.log(`[AIPracticeSpeakingTest] Pre-evaluated parts: ${Object.keys(partEvaluations).join(', ') || 'none'}`);
       
       const { data, error } = await supabase.functions.invoke('evaluate-ai-speaking', {
         body: {
@@ -360,6 +461,8 @@ export default function AIPracticeSpeakingTest() {
           difficulty: test?.difficulty,
           part2SpeakingDuration: part2Duration,
           fluencyFlag,
+          // Pass pre-evaluated parts to speed up final evaluation
+          preEvaluatedParts: partEvaluations,
         },
       });
 
@@ -373,6 +476,7 @@ export default function AIPracticeSpeakingTest() {
         throw new Error(data.error);
       }
 
+      setEvaluationStep(4);
       console.log('[AIPracticeSpeakingTest] Submission successful, model used:', data?.usedModel);
       setPhase('done');
       navigate(`/ai-practice/speaking/results/${testId}`);
@@ -410,6 +514,9 @@ export default function AIPracticeSpeakingTest() {
   const transitionToPart3 = () => {
     setPhase('part2_transition');
 
+    // Trigger background evaluation for Part 2
+    evaluatePartInBackground(2);
+
     if (speakingPartsRef.current.part3) {
       speakText("Thank you. That is the end of Part 2. Now we will move on to Part 3.");
     } else {
@@ -419,6 +526,9 @@ export default function AIPracticeSpeakingTest() {
 
   const transitionAfterPart1 = () => {
     const parts = speakingPartsRef.current;
+
+    // Trigger background evaluation for Part 1
+    evaluatePartInBackground(1);
 
     if (parts.part2) {
       setPhase('part1_transition');
@@ -839,13 +949,22 @@ export default function AIPracticeSpeakingTest() {
           </div>
         )}
 
-        {/* Submitting state */}
+        {/* Submitting state - Full screen AILoadingScreen */}
         {phase === 'submitting' && (
-          <div className="flex flex-col items-center gap-4 py-12">
-            <Loader2 className="w-12 h-12 animate-spin text-primary" />
-            <p className="text-lg">Submitting your test for evaluation...</p>
-            <p className="text-sm text-muted-foreground">This may take a moment</p>
-          </div>
+          <AILoadingScreen
+            title="Evaluating Your Speaking Test"
+            description="AI is analyzing your responses"
+            progressSteps={[
+              'Preparing audio',
+              'Waiting for part evaluations',
+              'Processing recordings',
+              'Generating feedback',
+              'Finalizing results',
+            ]}
+            currentStepIndex={evaluationStep}
+            estimatedTime="30-60 seconds"
+            estimatedSeconds={45}
+          />
         )}
 
         {/* Progress indicator */}
