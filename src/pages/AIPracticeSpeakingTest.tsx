@@ -21,6 +21,7 @@ import {
   Play,
   Pause,
   RotateCcw,
+  ArrowLeft,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -916,6 +917,14 @@ export default function AIPracticeSpeakingTest() {
       <header className="border-b bg-card">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => navigate('/ai-practice')}
+              title="Exit Test"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
             <Badge variant="outline" className="font-mono">
               Part {currentPart}
             </Badge>

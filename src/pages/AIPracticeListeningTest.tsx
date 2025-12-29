@@ -607,6 +607,13 @@ export default function AIPracticeListeningTest() {
           {/* Top Header - IELTS Official Style with AI Practice badge */}
           <header className="border-b px-2 md:px-4 py-1 md:py-3 flex items-center justify-between ielts-card ielts-header">
             <div className="flex items-center gap-2 md:gap-4">
+              <button 
+                onClick={() => navigate('/ai-practice')}
+                className="p-2 rounded hover:bg-muted transition-colors"
+                title="Exit Test"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
               <div className="ielts-logo">
                 <span className="text-lg md:text-xl font-black tracking-tight text-[#c8102e]">IELTS</span>
               </div>

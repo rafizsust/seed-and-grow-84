@@ -23,7 +23,7 @@ import { describeApiError } from '@/lib/apiErrors';
 import { AILoadingScreen } from '@/components/common/AILoadingScreen';
 import { WritingTestControls } from '@/components/writing/WritingTestControls';
 import { TestStartOverlay } from '@/components/common/TestStartOverlay';
-import { Clock, Send, PenTool, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Clock, Send, PenTool, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 
@@ -385,6 +385,14 @@ export default function AIPracticeWritingTest() {
       <header className="sticky top-0 z-50 bg-background border-b border-border px-4 py-3">
         <div className="container max-w-6xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => navigate('/ai-practice')}
+              title="Exit Test"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
             <PenTool className="w-5 h-5 text-primary" />
             <div>
               <h1 className="font-semibold text-sm md:text-base">
