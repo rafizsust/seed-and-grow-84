@@ -16,17 +16,20 @@ import {
   Mic,
   Clock,
   Target,
-  ChevronRight,
   Trash2,
   History,
   Sparkles,
-  ArrowLeft
+  ArrowLeft,
+  Eye,
+  RotateCcw,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { setCurrentTest, GeneratedTest } from '@/types/aiPractice';
 import type { Tables } from '@/integrations/supabase/types';
 
 type AIPracticeTest = Tables<'ai_practice_tests'>;
+type AIPracticeResult = Tables<'ai_practice_results'>;
 
 const MODULE_ICONS: Record<string, typeof BookOpen> = {
   reading: BookOpen,
@@ -46,6 +49,7 @@ export default function AIPracticeHistory() {
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
   const [tests, setTests] = useState<AIPracticeTest[]>([]);
+  const [testResults, setTestResults] = useState<Record<string, AIPracticeResult>>({});
   const [loading, setLoading] = useState(true);
   const [activeModule, setActiveModule] = useState<string>('all');
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -62,14 +66,36 @@ export default function AIPracticeHistory() {
     if (!user) return;
     
     try {
-      const { data, error } = await supabase
+      // Load tests
+      const { data: testsData, error: testsError } = await supabase
         .from('ai_practice_tests')
         .select('*')
         .eq('user_id', user.id)
         .order('generated_at', { ascending: false });
 
-      if (error) throw error;
-      setTests(data || []);
+      if (testsError) throw testsError;
+      setTests(testsData || []);
+
+      // Load results for these tests
+      if (testsData && testsData.length > 0) {
+        const testIds = testsData.map(t => t.id);
+        const { data: resultsData } = await supabase
+          .from('ai_practice_results')
+          .select('*')
+          .eq('user_id', user.id)
+          .in('test_id', testIds);
+
+        if (resultsData) {
+          const resultsMap: Record<string, AIPracticeResult> = {};
+          resultsData.forEach(r => {
+            // Keep the most recent result per test
+            if (!resultsMap[r.test_id] || new Date(r.completed_at) > new Date(resultsMap[r.test_id].completed_at)) {
+              resultsMap[r.test_id] = r;
+            }
+          });
+          setTestResults(resultsMap);
+        }
+      }
     } catch (err: any) {
       console.error('Failed to load tests:', err);
       toast({
@@ -109,6 +135,31 @@ export default function AIPracticeHistory() {
       });
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  // Navigate to results page for a test (if results exist)
+  const handleViewResults = (test: AIPracticeTest) => {
+    const result = testResults[test.id];
+    if (!result) {
+      toast({
+        title: 'No Results Yet',
+        description: 'Complete the test first to view results.',
+      });
+      return;
+    }
+
+    // Navigate to appropriate results page based on module
+    if (test.module === 'writing') {
+      navigate(`/ai-practice/writing/results/${test.id}`);
+    } else if (test.module === 'speaking') {
+      navigate(`/ai-practice/speaking/results/${test.id}`);
+    } else if (test.module === 'reading') {
+      navigate(`/ai-practice/results/${test.id}`);
+    } else if (test.module === 'listening') {
+      navigate(`/ai-practice/results/${test.id}`);
+    } else {
+      navigate(`/ai-practice/results/${test.id}`);
     }
   };
 
@@ -257,9 +308,18 @@ export default function AIPracticeHistory() {
             <div className="space-y-4">
               {filteredTests.map((test) => {
                 const ModuleIcon = MODULE_ICONS[test.module] || BookOpen;
+                const hasResult = !!testResults[test.id];
+                const result = testResults[test.id];
                 
                 return (
-                  <Card key={test.id} className="hover:border-primary/50 transition-colors">
+                  <Card 
+                    key={test.id} 
+                    className={cn(
+                      "transition-colors",
+                      hasResult ? "hover:border-primary/50 cursor-pointer" : "hover:border-border"
+                    )}
+                    onClick={() => hasResult && handleViewResults(test)}
+                  >
                     <CardContent className="p-4">
                       <div className="flex items-start gap-4">
                         <div className="p-3 rounded-lg bg-primary/10">
@@ -272,6 +332,17 @@ export default function AIPracticeHistory() {
                             <Badge variant="outline" className={DIFFICULTY_COLORS[test.difficulty]}>
                               {test.difficulty}
                             </Badge>
+                            {hasResult && result?.band_score && (
+                              <Badge className="bg-primary/20 text-primary border-primary/30">
+                                Band {Number(result.band_score).toFixed(1)}
+                              </Badge>
+                            )}
+                            {hasResult && (
+                              <Badge variant="secondary" className="gap-1 text-xs">
+                                <Eye className="w-3 h-3" />
+                                Completed
+                              </Badge>
+                            )}
                           </div>
                           
                           <p className="text-sm text-muted-foreground mb-2 line-clamp-1">
@@ -293,7 +364,7 @@ export default function AIPracticeHistory() {
                           </div>
                         </div>
                         
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                           <Button
                             variant="ghost"
                             size="icon"
@@ -303,9 +374,9 @@ export default function AIPracticeHistory() {
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
-                          <Button onClick={() => handleStartTest(test)}>
-                            Start
-                            <ChevronRight className="w-4 h-4 ml-1" />
+                          <Button onClick={() => handleStartTest(test)} className="gap-1">
+                            <RotateCcw className="w-4 h-4" />
+                            <span className="hidden sm:inline">Restart</span>
                           </Button>
                         </div>
                       </div>
