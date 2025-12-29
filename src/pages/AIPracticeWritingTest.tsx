@@ -8,17 +8,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   loadGeneratedTest, 
   savePracticeResult, 
+  savePracticeResultAsync,
   GeneratedTest, 
   PracticeResult,
   GeneratedWritingSingleTask,
   isWritingFullTest 
 } from '@/types/aiPractice';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/useAuth';
 import { useTopicCompletions } from '@/hooks/useTopicCompletions';
 import { supabase } from '@/integrations/supabase/client';
 import { describeApiError } from '@/lib/apiErrors';
 import { AILoadingScreen } from '@/components/common/AILoadingScreen';
-import { TestStartOverlay } from '@/components/common/TestStartOverlay';
 import { WritingTestControls } from '@/components/writing/WritingTestControls';
 import { Clock, Send, PenTool, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -27,8 +28,8 @@ export default function AIPracticeWritingTest() {
   const { testId } = useParams<{ testId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user } = useAuth();
   const { incrementCompletion } = useTopicCompletions('writing');
-  
   const [test, setTest] = useState<GeneratedTest | null>(null);
   const [submissionText1, setSubmissionText1] = useState('');
   const [submissionText2, setSubmissionText2] = useState('');
@@ -130,6 +131,9 @@ export default function AIPracticeWritingTest() {
       };
 
       savePracticeResult(result);
+      if (user) {
+        await savePracticeResultAsync(result, user.id, 'writing');
+      }
       // Track topic completion
       if (test?.topic) {
         incrementCompletion(test.topic);
@@ -152,6 +156,9 @@ export default function AIPracticeWritingTest() {
         questionResults: [{ questionNumber: 1, userAnswer: submissionText1, correctAnswer: 'N/A', isCorrect: true, explanation: 'Evaluation not available' }],
       };
       savePracticeResult(result);
+      if (user) {
+        await savePracticeResultAsync(result, user.id, 'writing');
+      }
       navigate(`/ai-practice/results/${test!.id}`);
     }
   };
