@@ -467,7 +467,10 @@ export default function AIPractice() {
       }
 
       if (data?.error) {
-        throw new Error(data.error);
+        // Create error object with full context from edge function response
+        const errorWithContext = new Error(data.error);
+        (errorWithContext as any).edgeFunctionData = data;
+        throw errorWithContext;
       }
 
       // Save to localStorage
@@ -527,6 +530,48 @@ export default function AIPractice() {
       playErrorSound();
       
       const errorDesc = describeApiError(err);
+      
+      // If quota exceeded, update local quota display to show as maxed
+      const isQuotaError = errorDesc.kind === 'quota' || errorDesc.kind === 'rate_limited' ||
+        err?.edgeFunctionData?.errorType === 'QUOTA_EXCEEDED';
+      
+      if (isQuotaError && user) {
+        // Update the quota in DB to show as maxed out
+        const today = new Date().toISOString().split('T')[0];
+        const GEMINI_FREE_DAILY_LIMIT = 1500000;
+        
+        try {
+          // Upsert to set quota to max
+          const { data: existingUsage } = await supabase
+            .from('gemini_daily_usage')
+            .select('id, tokens_used')
+            .eq('user_id', user.id)
+            .eq('usage_date', today)
+            .maybeSingle();
+          
+          if (existingUsage) {
+            // Update to max if not already there
+            if (existingUsage.tokens_used < GEMINI_FREE_DAILY_LIMIT) {
+              await supabase
+                .from('gemini_daily_usage')
+                .update({ tokens_used: GEMINI_FREE_DAILY_LIMIT })
+                .eq('id', existingUsage.id);
+            }
+          } else {
+            // Insert with max quota
+            await supabase
+              .from('gemini_daily_usage')
+              .insert({
+                user_id: user.id,
+                usage_date: today,
+                tokens_used: GEMINI_FREE_DAILY_LIMIT,
+                requests_count: 1,
+              });
+          }
+        } catch (quotaErr) {
+          console.warn('Could not update quota display:', quotaErr);
+        }
+      }
       
       toast({
         title: errorDesc.title,

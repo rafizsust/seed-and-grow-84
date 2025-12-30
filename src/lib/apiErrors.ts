@@ -168,6 +168,9 @@ function descriptionForKind(kind: ApiErrorKind, customMessage?: string): string 
  * into a clean, user-friendly message (no raw non-2xx strings).
  */
 export function describeApiError(err: unknown): ApiErrorDescriptor {
+  // First check for edge function data attached to error
+  const edgeFunctionData = (err as any)?.edgeFunctionData;
+  
   const msg =
     typeof err === "string"
       ? err
@@ -184,12 +187,33 @@ export function describeApiError(err: unknown): ApiErrorDescriptor {
 
   const rawText = normalizeErrorText(msg);
   const combinedForDetect = `${rawText}\n${embeddedMsg}`.trim();
+  
+  // Also check edgeFunctionData for error type detection
+  const edgeFunctionStr = edgeFunctionData ? safeString(edgeFunctionData) : "";
+  const fullCombined = `${combinedForDetect}\n${edgeFunctionStr}`;
 
-  const kind = inferKind(combinedForDetect.toLowerCase(), safeString(embedded).toLowerCase());
+  const kind = inferKind(fullCombined.toLowerCase(), safeString(embedded).toLowerCase());
 
   // Extract custom message from edge function if available
   let customMessage: string | undefined;
-  if (embedded && typeof embedded === "object") {
+  
+  // First try to get from edgeFunctionData (most reliable)
+  if (edgeFunctionData) {
+    if (edgeFunctionData.errorType === 'QUOTA_EXCEEDED' && edgeFunctionData.error) {
+      // Parse the QUOTA_EXCEEDED prefix message
+      const errorMsg = edgeFunctionData.error;
+      if (errorMsg.includes('QUOTA_EXCEEDED:')) {
+        customMessage = errorMsg.replace('QUOTA_EXCEEDED:', '').trim();
+      } else {
+        customMessage = errorMsg;
+      }
+    } else if (edgeFunctionData.suggestion) {
+      customMessage = `${edgeFunctionData.error || 'Request failed'}. ${edgeFunctionData.suggestion}`;
+    }
+  }
+  
+  // Fallback to embedded JSON parsing
+  if (!customMessage && embedded && typeof embedded === "object") {
     const embeddedObj = embedded as any;
     if (embeddedObj.userMessage) {
       customMessage = embeddedObj.userMessage;
@@ -206,6 +230,6 @@ export function describeApiError(err: unknown): ApiErrorDescriptor {
     title: titleForKind(kind),
     description: descriptionForKind(kind, customMessage),
     action: defaultActionForKind(kind),
-    debug: combinedForDetect || undefined,
+    debug: fullCombined || undefined,
   };
 }
