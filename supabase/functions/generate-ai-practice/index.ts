@@ -80,65 +80,61 @@ let lastGeminiError: string | null = null;
 let lastTokensUsed: number = 0;
 let isQuotaExceeded: boolean = false;
 
-// Pre-flight validation: Make a tiny test request to check if API key is rate-limited
-async function preflightApiCheck(apiKey: string): Promise<{ ok: boolean; error?: string }> {
+// Pre-flight validation: Check API key validity without consuming generation quota
+// Uses a lightweight models/list call instead of a generation request
+async function preflightApiCheck(apiKey: string, skipPreflight: boolean = false): Promise<{ ok: boolean; error?: string }> {
+  // Allow skipping preflight when caller wants to proceed directly to main request
+  if (skipPreflight) {
+    console.log('Skipping pre-flight check (skipPreflight=true)');
+    return { ok: true };
+  }
+
   try {
-    console.log('Running pre-flight API validation...');
+    console.log('Running lightweight pre-flight API validation...');
     
-    // Use the smallest, fastest model with a minimal prompt
+    // Use models/list endpoint - this validates API key without consuming generation quota
+    // This endpoint has much higher rate limits than generation endpoints
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=1`,
       {
-        method: 'POST',
+        method: 'GET',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Reply with just: OK' }] }],
-          generationConfig: {
-            temperature: 0,
-            maxOutputTokens: 5,
-          },
-        }),
       }
     );
 
     if (!response.ok) {
-      const errorData = await response.json();
+      const errorData = await response.json().catch(() => ({}));
       const errorStatus = errorData?.error?.status || '';
       const errorMessage = errorData?.error?.message || '';
       
       console.error('Pre-flight check failed:', response.status, errorStatus);
       
-      if (response.status === 429 || errorStatus === 'RESOURCE_EXHAUSTED') {
-        return {
-          ok: false,
-          error: 'QUOTA_EXCEEDED: Your Gemini API has reached its rate limit. This may include usage from other platforms (Google AI Studio, other apps). Please wait a few minutes before trying again.',
-        };
-      } else if (response.status === 403 || errorStatus === 'PERMISSION_DENIED') {
+      // Only treat 403/401 as definitive API key issues
+      // 429 on list endpoint is very rare but could happen with extremely high abuse
+      if (response.status === 403 || response.status === 401 || errorStatus === 'PERMISSION_DENIED') {
         return {
           ok: false,
           error: 'API_KEY_INVALID: Your Gemini API key appears to be invalid or lacks permissions. Please verify your API key in settings.',
         };
-      } else if (response.status === 400) {
-        return {
-          ok: false,
-          error: 'API_ERROR: Invalid request. Please check your API key configuration.',
-        };
+      } else if (response.status === 429 || errorStatus === 'RESOURCE_EXHAUSTED') {
+        // Don't block on rate limit during pre-flight - let the main request try
+        // The actual generation endpoint has separate limits
+        console.warn('Pre-flight list endpoint rate-limited, proceeding to main request anyway');
+        return { ok: true };
       }
       
-      return {
-        ok: false,
-        error: `API_ERROR: Gemini API returned error ${response.status}: ${errorMessage.slice(0, 100)}`,
-      };
+      // For other errors, proceed anyway and let main request handle it
+      console.warn(`Pre-flight returned ${response.status}, proceeding to main request`);
+      return { ok: true };
     }
 
     console.log('Pre-flight API check passed');
     return { ok: true };
   } catch (err) {
     console.error('Pre-flight check connection error:', err);
-    return {
-      ok: false,
-      error: 'CONNECTION_ERROR: Unable to reach Gemini API. Please check your internet connection.',
-    };
+    // Connection errors should not block - let the main request try
+    console.warn('Pre-flight connection failed, proceeding to main request anyway');
+    return { ok: true };
   }
 }
 
@@ -185,82 +181,123 @@ async function updateQuotaTracking(supabase: any, userId: string, tokensUsed: nu
   }
 }
 
-async function callGemini(apiKey: string, prompt: string): Promise<string | null> {
+// Helper function to wait with exponential backoff
+async function waitWithBackoff(attempt: number, baseDelayMs: number = 1000): Promise<void> {
+  const delay = Math.min(baseDelayMs * Math.pow(2, attempt), 30000); // Max 30 seconds
+  console.log(`Waiting ${delay}ms before retry (attempt ${attempt + 1})...`);
+  await new Promise(resolve => setTimeout(resolve, delay));
+}
+
+async function callGemini(apiKey: string, prompt: string, maxRetries: number = 2): Promise<string | null> {
   lastGeminiError = null;
   lastTokensUsed = 0;
   isQuotaExceeded = false;
   
   for (const model of GEMINI_MODELS) {
-    try {
-      console.log(`Trying Gemini model: ${model}`);
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.7,
-              maxOutputTokens: 8192,
-            },
-          }),
-        }
-      );
+    let retryCount = 0;
+    
+    while (retryCount <= maxRetries) {
+      try {
+        console.log(`Trying Gemini model: ${model}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 8192,
+              },
+            }),
+          }
+        );
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error(`Gemini ${model} failed:`, JSON.stringify(errorData));
-        
-        // Parse error message for user-friendly display
-        const errorMessage = errorData?.error?.message || '';
-        const errorStatus = errorData?.error?.status || '';
-        
-        if (response.status === 429 || errorStatus === 'RESOURCE_EXHAUSTED') {
-          isQuotaExceeded = true;
-          lastGeminiError = 'QUOTA_EXCEEDED: Your Gemini API has reached its rate limit. This may be due to usage on other platforms (Google AI Studio, other apps). Please wait a few minutes and try again, or check your usage at aistudio.google.com.';
-          // Don't continue to other models for quota errors - they'll all fail
-          break;
-        } else if (response.status === 403 || errorStatus === 'PERMISSION_DENIED') {
-          lastGeminiError = 'API access denied. Please verify your Gemini API key is valid and has the correct permissions.';
-          continue;
-        } else if (response.status === 400) {
-          lastGeminiError = 'Invalid request to AI. The generation request was rejected. Please try again with different settings.';
-          continue;
-        } else {
-          lastGeminiError = `AI service error (${response.status}): ${errorMessage.slice(0, 100)}`;
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error(`Gemini ${model} failed:`, JSON.stringify(errorData));
+          
+          // Parse error message for user-friendly display
+          const errorMessage = errorData?.error?.message || '';
+          const errorStatus = errorData?.error?.status || '';
+          
+          if (response.status === 429 || errorStatus === 'RESOURCE_EXHAUSTED') {
+            // Check if it's a rate limit that might recover with waiting
+            const retryAfter = response.headers.get('Retry-After');
+            
+            if (retryCount < maxRetries) {
+              // Try waiting and retrying for rate limits
+              console.log(`Rate limit hit on ${model}, will retry after backoff...`);
+              await waitWithBackoff(retryCount);
+              retryCount++;
+              continue;
+            }
+            
+            // All retries exhausted for this model due to rate limit
+            isQuotaExceeded = true;
+            lastGeminiError = 'QUOTA_EXCEEDED: Your Gemini API has reached its rate limit. This may be due to usage on other platforms (Google AI Studio, other apps). Please wait a few minutes and try again, or check your usage at aistudio.google.com.';
+            // Try next model instead of breaking completely
+            break;
+          } else if (response.status === 403 || errorStatus === 'PERMISSION_DENIED') {
+            lastGeminiError = 'API access denied. Please verify your Gemini API key is valid and has the correct permissions.';
+            break; // Move to next model
+          } else if (response.status === 400) {
+            lastGeminiError = 'Invalid request to AI. The generation request was rejected. Please try again with different settings.';
+            break; // Move to next model
+          } else if (response.status >= 500) {
+            // Server errors - retry with backoff
+            if (retryCount < maxRetries) {
+              console.log(`Server error on ${model}, will retry after backoff...`);
+              await waitWithBackoff(retryCount);
+              retryCount++;
+              continue;
+            }
+            lastGeminiError = `AI service error (${response.status}): ${errorMessage.slice(0, 100)}`;
+          } else {
+            lastGeminiError = `AI service error (${response.status}): ${errorMessage.slice(0, 100)}`;
+          }
+          break; // Move to next model
         }
-        continue;
-      }
 
-      const data = await response.json();
-      
-      // Extract token usage from response metadata
-      const usageMetadata = data.usageMetadata;
-      if (usageMetadata) {
-        const promptTokens = usageMetadata.promptTokenCount || 0;
-        const candidateTokens = usageMetadata.candidatesTokenCount || 0;
-        lastTokensUsed = promptTokens + candidateTokens;
-        console.log(`Token usage - Prompt: ${promptTokens}, Output: ${candidateTokens}, Total: ${lastTokensUsed}`);
-      }
-      
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) {
-        console.log(`Success with ${model}`);
-        return text;
-      } else {
-        // Check for content filtering or safety issues
-        const finishReason = data.candidates?.[0]?.finishReason;
-        if (finishReason === 'SAFETY') {
-          lastGeminiError = 'Content was filtered by safety settings. Please try a different topic.';
-        } else {
-          lastGeminiError = 'AI returned empty response. Please try again.';
+        const data = await response.json();
+        
+        // Extract token usage from response metadata
+        const usageMetadata = data.usageMetadata;
+        if (usageMetadata) {
+          const promptTokens = usageMetadata.promptTokenCount || 0;
+          const candidateTokens = usageMetadata.candidatesTokenCount || 0;
+          lastTokensUsed = promptTokens + candidateTokens;
+          console.log(`Token usage - Prompt: ${promptTokens}, Output: ${candidateTokens}, Total: ${lastTokensUsed}`);
         }
+        
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          console.log(`Success with ${model}`);
+          return text;
+        } else {
+          // Check for content filtering or safety issues
+          const finishReason = data.candidates?.[0]?.finishReason;
+          if (finishReason === 'SAFETY') {
+            lastGeminiError = 'Content was filtered by safety settings. Please try a different topic.';
+          } else {
+            lastGeminiError = 'AI returned empty response. Please try again.';
+          }
+        }
+        break; // Move to next model
+      } catch (err) {
+        console.error(`Error with ${model}:`, err);
+        
+        if (retryCount < maxRetries) {
+          console.log(`Connection error on ${model}, will retry after backoff...`);
+          await waitWithBackoff(retryCount);
+          retryCount++;
+          continue;
+        }
+        
+        lastGeminiError = `Connection error: Unable to reach AI service. Please check your internet connection and try again.`;
+        break; // Move to next model
       }
-    } catch (err) {
-      console.error(`Error with ${model}:`, err);
-      lastGeminiError = `Connection error: Unable to reach AI service. Please check your internet connection and try again.`;
-      continue;
     }
   }
   return null;
@@ -1967,8 +2004,18 @@ serve(async (req) => {
     
     const geminiApiKey = await decryptApiKey(secretData.encrypted_value, appEncryptionKey);
 
-    // Pre-flight validation: Check if API key is rate-limited before expensive operations
-    const preflightResult = await preflightApiCheck(geminiApiKey);
+    // Parse request body first to check for skipPreflight option
+    const body = await req.json();
+    const { module, questionType, difficulty, topicPreference, questionCount, timeMinutes, readingConfig, listeningConfig, writingConfig, skipPreflight } = body;
+    
+    const topic = topicPreference || IELTS_TOPICS[Math.floor(Math.random() * IELTS_TOPICS.length)];
+    const testId = crypto.randomUUID();
+
+    console.log(`Generating ${module} test: ${questionType}, ${difficulty}, topic: ${topic}, questions: ${questionCount}`);
+
+    // Pre-flight validation: Uses lightweight list endpoint, allows skipping
+    // The main callGemini function now has its own retry logic for rate limits
+    const preflightResult = await preflightApiCheck(geminiApiKey, skipPreflight === true);
     if (!preflightResult.ok) {
       console.error('Pre-flight API check failed:', preflightResult.error);
       const isQuota = preflightResult.error?.startsWith('QUOTA_EXCEEDED');
@@ -1984,15 +2031,6 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-
-    // Parse request
-    const body = await req.json();
-    const { module, questionType, difficulty, topicPreference, questionCount, timeMinutes, readingConfig, listeningConfig, writingConfig } = body;
-    
-    const topic = topicPreference || IELTS_TOPICS[Math.floor(Math.random() * IELTS_TOPICS.length)];
-    const testId = crypto.randomUUID();
-
-    console.log(`Generating ${module} test: ${questionType}, ${difficulty}, topic: ${topic}, questions: ${questionCount}`);
     if (readingConfig) {
       console.log(`Reading config: paragraphs=${readingConfig.paragraphCount}, words=${readingConfig.wordCount}, preset=${readingConfig.passagePreset}`);
     }
