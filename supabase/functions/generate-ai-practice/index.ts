@@ -362,20 +362,24 @@ async function generateSvgWithGemini(prompt: string, geminiApiKey: string): Prom
     return null;
   }
 
-  const svgPrompt = `${prompt}
+  const svgPrompt = `YOU MUST OUTPUT RAW SVG CODE ONLY. NO EXPLANATIONS.
 
-CRITICAL OUTPUT REQUIREMENTS:
-- Return ONLY valid SVG code, nothing else
-- Do NOT wrap in markdown code blocks
-- Start with <svg and end with </svg>
-- Use viewBox for responsive sizing (e.g., viewBox="0 0 800 600")
-- Use clean, professional styling suitable for an exam
-- Style: Clean architectural diagram with white/light background
-- Use black or dark gray (#333) for lines and text
-- Use subtle colors for fills (light blues, greens, grays)
-- Include all text labels clearly visible
-- Ensure good contrast and readability
-- Keep the SVG simple and clean, avoid gradients where possible`;
+${prompt}
+
+ABSOLUTELY CRITICAL - OUTPUT FORMAT:
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+  <!-- Your SVG content here -->
+</svg>
+
+RULES:
+1. Start your ENTIRE response with <svg and end with </svg>
+2. NO text before or after the SVG tags
+3. NO markdown, NO explanations, NO commentary
+4. Include xmlns attribute in svg tag
+5. Use viewBox for sizing
+6. Clean professional style with good contrast
+7. White/light background, dark text (#333)
+8. Keep it simple - no complex gradients`;
 
   const maxRetries = 2;
 
@@ -423,29 +427,34 @@ CRITICAL OUTPUT REQUIREMENTS:
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
       
       if (text) {
+        // Log first 500 chars to debug what Gemini is returning
+        console.log(`SVG response preview (first 500 chars): ${text.substring(0, 500)}`);
+        
         // Extract SVG from response (may have markdown wrapper)
         let svg = text.trim();
         
-        // Remove markdown code blocks if present
-        const codeBlockMatch = svg.match(/```(?:svg|xml)?\s*\n?([\s\S]*?)\n?```/);
+        // Remove markdown code blocks if present (handle various formats)
+        const codeBlockMatch = svg.match(/```(?:svg|xml|html)?\s*\n?([\s\S]*?)\n?```/);
         if (codeBlockMatch && codeBlockMatch[1]) {
           svg = codeBlockMatch[1].trim();
+          console.log('Extracted SVG from markdown code block');
         }
         
-        // Validate it looks like SVG
-        if (svg.toLowerCase().startsWith('<svg') && svg.toLowerCase().includes('</svg>')) {
-          console.log('SVG generated successfully');
-          return svg;
-        }
-        
-        // Try to extract SVG from mixed content
-        const svgMatch = svg.match(/<svg[\s\S]*<\/svg>/i);
+        // Try to extract SVG from anywhere in response (most permissive extraction)
+        const svgMatch = svg.match(/<svg[^>]*>[\s\S]*?<\/svg>/i);
         if (svgMatch) {
-          console.log('SVG extracted from response');
-          return svgMatch[0];
+          const extractedSvg = svgMatch[0];
+          // Basic validation: should have some content
+          if (extractedSvg.length > 100) {
+            console.log(`SVG extracted successfully (${extractedSvg.length} chars)`);
+            return extractedSvg;
+          }
+          console.log(`SVG too short (${extractedSvg.length} chars), retrying...`);
+        } else {
+          console.log('No SVG tags found in response');
         }
-        
-        console.log('Response did not contain valid SVG');
+      } else {
+        console.log('Empty response from Gemini');
       }
       
       if (attempt < maxRetries) {
