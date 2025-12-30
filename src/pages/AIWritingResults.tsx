@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { SafeSVG } from '@/components/common/SafeSVG';
+import { IELTSVisualRenderer, IELTSChartData } from '@/components/common/IELTSVisualRenderer';
 import {
   RotateCcw,
   Home,
@@ -71,7 +71,7 @@ interface WritingResult {
   task1_text?: string;
   task2_text?: string;
   task1_image_base64?: string;
-  task1_svg_code?: string; // SVG code for Task 1 visual
+  task1_chart_data?: object; // JSON chart data for Task 1 visual
   task1_visual_type?: string;
   created_at: string;
 }
@@ -162,7 +162,7 @@ export default function AIWritingResults() {
 
       const payload = testRow?.payload as any;
       const task1ImageBase64 = payload?.writingTask?.task1?.image_base64 || payload?.writingTask?.image_base64;
-      const task1SvgCode = payload?.writingTask?.task1?.svgCode || payload?.writingTask?.svgCode;
+      const task1ChartData = payload?.writingTask?.task1?.chartData || payload?.writingTask?.chartData;
       const task1VisualType = payload?.writingTask?.task1?.visual_type || payload?.writingTask?.visual_type;
 
       // Load the result
@@ -200,7 +200,7 @@ export default function AIWritingResults() {
         task1_text: answers?.['1'] || answers?.task1,
         task2_text: answers?.['2'] || answers?.task2,
         task1_image_base64: task1ImageBase64,
-        task1_svg_code: task1SvgCode,
+        task1_chart_data: task1ChartData,
         task1_visual_type: task1VisualType,
         created_at: data.completed_at,
       });
@@ -359,7 +359,7 @@ export default function AIWritingResults() {
         )}
 
         {/* Task 1 Visual Context */}
-        {isTask1 && (result.task1_svg_code || result.task1_image_base64) && (
+        {isTask1 && (result.task1_chart_data || result.task1_image_base64) && (
           <Card className="mb-4">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -369,9 +369,9 @@ export default function AIWritingResults() {
             </CardHeader>
             <CardContent>
               <div className="flex justify-center">
-                {result.task1_svg_code ? (
-                  <SafeSVG 
-                    svgCode={result.task1_svg_code}
+                {result.task1_chart_data ? (
+                  <IELTSVisualRenderer 
+                    chartData={result.task1_chart_data as IELTSChartData}
                     fallbackDescription={`${result.task1_visual_type?.replace(/_/g, ' ') || 'Visual'} diagram`}
                     maxWidth={500}
                     maxHeight={300}
