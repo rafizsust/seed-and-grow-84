@@ -77,9 +77,56 @@ const GEMINI_MODELS = [
 
 // Store last error for better error messages
 let lastGeminiError: string | null = null;
+let lastTokensUsed: number = 0;
+let isQuotaExceeded: boolean = false;
+
+// Update quota tracking in the database
+async function updateQuotaTracking(supabase: any, userId: string, tokensUsed: number): Promise<void> {
+  if (!userId || tokensUsed <= 0) return;
+  
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Check for existing record
+    const { data: existingData } = await supabase
+      .from('gemini_daily_usage')
+      .select('id, tokens_used, requests_count')
+      .eq('user_id', userId)
+      .eq('usage_date', today)
+      .maybeSingle();
+
+    if (existingData) {
+      // Update existing record
+      await supabase
+        .from('gemini_daily_usage')
+        .update({
+          tokens_used: existingData.tokens_used + tokensUsed,
+          requests_count: existingData.requests_count + 1,
+          last_updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingData.id);
+    } else {
+      // Insert new record
+      await supabase
+        .from('gemini_daily_usage')
+        .insert({
+          user_id: userId,
+          usage_date: today,
+          tokens_used: tokensUsed,
+          requests_count: 1,
+        });
+    }
+    
+    console.log(`Updated quota for user ${userId}: +${tokensUsed} tokens`);
+  } catch (err) {
+    console.error('Failed to update quota tracking:', err);
+  }
+}
 
 async function callGemini(apiKey: string, prompt: string): Promise<string | null> {
   lastGeminiError = null;
+  lastTokensUsed = 0;
+  isQuotaExceeded = false;
   
   for (const model of GEMINI_MODELS) {
     try {
@@ -108,8 +155,10 @@ async function callGemini(apiKey: string, prompt: string): Promise<string | null
         const errorStatus = errorData?.error?.status || '';
         
         if (response.status === 429 || errorStatus === 'RESOURCE_EXHAUSTED') {
-          lastGeminiError = 'API quota exceeded. Your Gemini API has reached its rate limit. Please wait a few minutes and try again, or check your Google AI Studio billing.';
-          continue;
+          isQuotaExceeded = true;
+          lastGeminiError = 'QUOTA_EXCEEDED: Your Gemini API has reached its rate limit. This may be due to usage on other platforms (Google AI Studio, other apps). Please wait a few minutes and try again, or check your usage at aistudio.google.com.';
+          // Don't continue to other models for quota errors - they'll all fail
+          break;
         } else if (response.status === 403 || errorStatus === 'PERMISSION_DENIED') {
           lastGeminiError = 'API access denied. Please verify your Gemini API key is valid and has the correct permissions.';
           continue;
@@ -123,6 +172,16 @@ async function callGemini(apiKey: string, prompt: string): Promise<string | null
       }
 
       const data = await response.json();
+      
+      // Extract token usage from response metadata
+      const usageMetadata = data.usageMetadata;
+      if (usageMetadata) {
+        const promptTokens = usageMetadata.promptTokenCount || 0;
+        const candidateTokens = usageMetadata.candidatesTokenCount || 0;
+        lastTokensUsed = promptTokens + candidateTokens;
+        console.log(`Token usage - Prompt: ${promptTokens}, Output: ${candidateTokens}, Total: ${lastTokensUsed}`);
+      }
+      
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
       if (text) {
         console.log(`Success with ${model}`);
@@ -147,6 +206,14 @@ async function callGemini(apiKey: string, prompt: string): Promise<string | null
 
 function getLastGeminiError(): string {
   return lastGeminiError || 'Failed to generate content. Please try again.';
+}
+
+function getLastTokensUsed(): number {
+  return lastTokensUsed;
+}
+
+function wasQuotaExceeded(): boolean {
+  return isQuotaExceeded;
 }
 
 // Robust JSON extraction from Gemini response
@@ -1858,12 +1925,34 @@ serve(async (req) => {
       const readingPrompt = getReadingPrompt(questionType, topic, difficulty, questionCount, readingConfig);
 
       const result = await callGemini(geminiApiKey, readingPrompt);
+      
+      // Track tokens used for this call
+      let totalTokensUsed = getLastTokensUsed();
+      
       if (!result) {
+        // If quota exceeded, return special error with status 429
+        if (wasQuotaExceeded()) {
+          return new Response(JSON.stringify({ 
+            error: getLastGeminiError(),
+            errorType: 'QUOTA_EXCEEDED',
+            suggestion: 'Check your usage at aistudio.google.com or wait a few minutes before retrying.'
+          }), {
+            status: 429,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
         return new Response(JSON.stringify({ error: getLastGeminiError() }), {
           status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
+      
+      // Update quota tracking in database
+      const serviceClient = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      );
+      await updateQuotaTracking(serviceClient, user.id, totalTokensUsed);
 
       let parsed;
       try {
@@ -2033,12 +2122,34 @@ serve(async (req) => {
       const listeningPrompt = getListeningPrompt(questionType, topic, difficulty, questionCount, scenario, listeningConfig);
 
       const result = await callGemini(geminiApiKey, listeningPrompt);
+      
+      // Track tokens used
+      let totalTokensUsed = getLastTokensUsed();
+      
       if (!result) {
+        // If quota exceeded, return special error with status 429
+        if (wasQuotaExceeded()) {
+          return new Response(JSON.stringify({ 
+            error: getLastGeminiError(),
+            errorType: 'QUOTA_EXCEEDED',
+            suggestion: 'Check your usage at aistudio.google.com or wait a few minutes before retrying.'
+          }), {
+            status: 429,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
         return new Response(JSON.stringify({ error: 'Failed to generate listening test' }), {
           status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
+      
+      // Update quota tracking
+      const serviceClient = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      );
+      await updateQuotaTracking(serviceClient, user.id, totalTokensUsed);
 
       let parsed;
       try {
@@ -2481,12 +2592,34 @@ Return ONLY valid JSON:
 Generate realistic, ${difficulty}-level questions appropriate for IELTS. Make questions coherent and thematically connected.`;
 
       const result = await callGemini(geminiApiKey, speakingPrompt);
+      
+      // Track tokens used
+      const totalTokensUsed = getLastTokensUsed();
+      
       if (!result) {
+        // If quota exceeded, return special error with status 429
+        if (wasQuotaExceeded()) {
+          return new Response(JSON.stringify({ 
+            error: getLastGeminiError(),
+            errorType: 'QUOTA_EXCEEDED',
+            suggestion: 'Check your usage at aistudio.google.com or wait a few minutes before retrying.'
+          }), {
+            status: 429,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
         return new Response(JSON.stringify({ error: getLastGeminiError() }), {
           status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
+      
+      // Update quota tracking
+      const serviceClient = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      );
+      await updateQuotaTracking(serviceClient, user.id, totalTokensUsed);
 
       let parsed;
       try {

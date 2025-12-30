@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { AlertTriangle, Zap } from "lucide-react";
+import { AlertTriangle, Zap, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface QuotaWarningDialogProps {
@@ -86,6 +86,16 @@ export function QuotaWarningDialog({
                 
                 <p className="text-xs text-muted-foreground text-center">
                   {percentUsed.toFixed(1)}% of daily quota used
+                </p>
+              </div>
+
+              {/* External usage disclaimer */}
+              <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
+                <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+                <p className="text-xs text-blue-700 dark:text-blue-300">
+                  <strong>Note:</strong> This quota tracking only reflects usage within this app. 
+                  If you use this API key on other platforms (Google AI Studio, other apps), 
+                  those tokens are not tracked here. You can reset the counter in Settings if needed.
                 </p>
               </div>
 

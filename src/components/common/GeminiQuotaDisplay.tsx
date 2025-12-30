@@ -2,11 +2,24 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Loader2, Zap, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import { Loader2, Zap, AlertTriangle, CheckCircle2, Info, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 // Gemini free tier daily limit (approximate)
 const GEMINI_FREE_DAILY_LIMIT = 1500000; // 1.5M tokens per day for free tier
@@ -15,13 +28,15 @@ interface GeminiQuotaDisplayProps {
   compact?: boolean;
   showCard?: boolean;
   className?: string;
+  onQuotaChange?: () => void;
 }
 
-export function GeminiQuotaDisplay({ compact = false, showCard = true, className }: GeminiQuotaDisplayProps) {
+export function GeminiQuotaDisplay({ compact = false, showCard = true, className, onQuotaChange }: GeminiQuotaDisplayProps) {
   const { user } = useAuth();
   const [tokensUsed, setTokensUsed] = useState(0);
   const [requestsCount, setRequestsCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [resetting, setResetting] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
 
   useEffect(() => {
@@ -67,6 +82,34 @@ export function GeminiQuotaDisplay({ compact = false, showCard = true, className
       console.error('Error fetching quota data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResetQuota = async () => {
+    if (!user) return;
+    
+    setResetting(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Delete today's usage record to reset the counter
+      const { error } = await supabase
+        .from('gemini_daily_usage')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('usage_date', today);
+
+      if (error) throw error;
+
+      setTokensUsed(0);
+      setRequestsCount(0);
+      toast.success('Quota counter reset successfully');
+      onQuotaChange?.();
+    } catch (error) {
+      console.error('Error resetting quota:', error);
+      toast.error('Failed to reset quota counter');
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -154,7 +197,7 @@ export function GeminiQuotaDisplay({ compact = false, showCard = true, className
         <span>{formatTokens(remainingTokens)} remaining</span>
       </div>
 
-      <div className="flex items-center gap-4 text-xs">
+      <div className="flex items-center justify-between text-xs">
         <div className="flex items-center gap-1">
           {usagePercent >= 90 ? (
             <AlertTriangle className="w-3 h-3 text-destructive" />
@@ -165,6 +208,39 @@ export function GeminiQuotaDisplay({ compact = false, showCard = true, className
         </div>
         <span className="text-muted-foreground">Resets at midnight UTC</span>
       </div>
+
+      {/* External usage warning */}
+      <div className="flex items-start gap-2 p-2.5 bg-blue-50 dark:bg-blue-950/30 rounded-md border border-blue-200 dark:border-blue-800">
+        <Info className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+        <p className="text-xs text-blue-700 dark:text-blue-300">
+          This only tracks in-app usage. External usage (Google AI Studio, other apps) is not reflected here.
+        </p>
+      </div>
+
+      {/* Reset button */}
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button variant="outline" size="sm" className="w-full gap-2" disabled={resetting || tokensUsed === 0}>
+            <RotateCcw className={cn("w-3.5 h-3.5", resetting && "animate-spin")} />
+            {resetting ? 'Resetting...' : 'Reset Quota Counter'}
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset Quota Counter?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will reset your tracked usage to zero. Use this if you've used your API key 
+              on other platforms and want to sync the counter, or if you believe the tracking is incorrect.
+              <br /><br />
+              <strong>Note:</strong> This doesn't reset your actual Gemini API quota — only our local tracking.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleResetQuota}>Reset Counter</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 
@@ -234,6 +310,21 @@ export async function checkQuotaAvailability(userId: string, estimatedCost: numb
     remaining,
     percentUsed,
   };
+}
+
+// Update quota usage after API call (userId kept for API consistency, auth handled by edge function)
+export async function updateQuotaUsage(_userId: string, tokensUsed: number): Promise<void> {
+  try {
+    const { error } = await supabase.functions.invoke('gemini-quota', {
+      body: { action: 'update', tokensUsed },
+    });
+    
+    if (error) {
+      console.error('Failed to update quota:', error);
+    }
+  } catch (err) {
+    console.error('Error updating quota:', err);
+  }
 }
 
 export { GEMINI_FREE_DAILY_LIMIT };
