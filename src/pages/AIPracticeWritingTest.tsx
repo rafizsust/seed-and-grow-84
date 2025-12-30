@@ -24,7 +24,7 @@ import { AILoadingScreen } from '@/components/common/AILoadingScreen';
 import { WritingTestControls } from '@/components/writing/WritingTestControls';
 import { TestStartOverlay } from '@/components/common/TestStartOverlay';
 import { ExitTestConfirmDialog } from '@/components/common/ExitTestConfirmDialog';
-import { SafeSVG } from '@/components/common/SafeSVG';
+import { IELTSVisualRenderer, IELTSChartData } from '@/components/common/IELTSVisualRenderer';
 import { Clock, Send, PenTool, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -284,16 +284,16 @@ export default function AIPracticeWritingTest() {
               {/* Task 1: Show visual first (as in real IELTS). Always render a diagram container so failure shows a professional placeholder. */}
               {task.task_type === 'task1' && (
                 <div className="flex justify-center py-4 border rounded-lg bg-muted/20">
-                  {task.svgCode ? (
-                    <SafeSVG
-                      svgCode={task.svgCode}
+                  {task.chartData ? (
+                    <IELTSVisualRenderer
+                      chartData={task.chartData as IELTSChartData}
                       fallbackDescription={task.image_description}
                       maxWidth={400}
                       maxHeight={250}
                     />
                   ) : (
-                    <SafeSVG
-                      svgCode={null}
+                    <IELTSVisualRenderer
+                      chartData={null}
                       fallbackDescription={task.image_description || 'Task 1 diagram could not be generated.'}
                       maxWidth={400}
                       maxHeight={250}
@@ -353,16 +353,16 @@ export default function AIPracticeWritingTest() {
             {/* Task 1: Show visual first (as in real IELTS). Always render a diagram container so failure shows a professional placeholder. */}
             {task.task_type === 'task1' && (
               <div className="flex justify-center py-4 border rounded-lg bg-muted/20">
-                {task.svgCode ? (
-                  <SafeSVG
-                    svgCode={task.svgCode}
+                {task.chartData ? (
+                  <IELTSVisualRenderer
+                    chartData={task.chartData as IELTSChartData}
                     fallbackDescription={task.image_description}
                     maxWidth={500}
                     maxHeight={350}
                   />
                 ) : (
-                  <SafeSVG
-                    svgCode={null}
+                  <IELTSVisualRenderer
+                    chartData={null}
                     fallbackDescription={task.image_description || 'Task 1 diagram could not be generated.'}
                     maxWidth={500}
                     maxHeight={350}

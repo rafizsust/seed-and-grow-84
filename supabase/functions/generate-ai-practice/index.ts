@@ -354,490 +354,174 @@ function extractJsonFromResponse(text: string): string {
   throw new Error('Could not extract valid JSON from AI response');
 }
 
-// Smart SVG extraction - handles truncated output, missing tags, and various formats
-function extractSVG(text: string): string | null {
-  if (!text || typeof text !== 'string') return null;
-  
-  let content = text.trim();
-  
-  // Step 1: Remove markdown code blocks if present
-  const codeBlockMatch = content.match(/```(?:svg|xml|html)?\s*\n?([\s\S]*?)\n?```/);
-  if (codeBlockMatch && codeBlockMatch[1]) {
-    content = codeBlockMatch[1].trim();
-    console.log('Extracted content from markdown code block');
-  }
-  
-  // Step 2: Try to find complete SVG (greedy match for complete tags)
-  const completeSvgMatch = content.match(/<svg[\s\S]*<\/svg>/i);
-  if (completeSvgMatch) {
-    const svg = completeSvgMatch[0];
-    if (svg.length > 100) {
-      console.log(`Complete SVG found (${svg.length} chars)`);
-      return svg;
-    }
-  }
-  
-  // Step 3: Handle truncated SVG - find opening tag and attempt to repair
-  const svgStartMatch = content.match(/<svg[^>]*>/i);
-  if (svgStartMatch) {
-    const startIndex = content.indexOf(svgStartMatch[0]);
-    let svgContent = content.substring(startIndex);
-    
-    // Check if SVG is truncated (missing closing tag)
-    if (!svgContent.toLowerCase().includes('</svg>')) {
-      console.log('SVG appears truncated, attempting repair...');
-      
-      // Try to close any open tags and add closing svg tag
-      // Count open tags that need closing
-      const openTags: string[] = [];
-      const tagPattern = /<(\w+)(?:\s[^>]*)?\s*(?:\/)?>/g;
-      const selfClosingPattern = /<\w+[^>]*\/>/g;
-      const closingPattern = /<\/(\w+)>/g;
-      
-      // Simple repair: just close the SVG
-      svgContent = svgContent + '</svg>';
-      console.log('Added closing </svg> tag to truncated SVG');
-    }
-    
-    if (svgContent.length > 100) {
-      console.log(`Repaired SVG extracted (${svgContent.length} chars)`);
-      return svgContent;
-    }
-  }
-  
-  console.log('No valid SVG structure found in response');
-  return null;
-}
+// ============================================================================
+// CHART DATA GENERATION (JSON-based, replaces SVG generation)
+// ============================================================================
 
-// Generate SVG code using Gemini text models - MINI-SVG MODE
-// Uses minimalist SVG to stay under gateway token limits
-// Returns valid SVG code that can be rendered directly in the browser
-async function generateSvgWithGemini(
-  prompt: string, 
-  geminiApiKey: string, 
-  maxTokens: number = 3000,
-  retryForCompletion: boolean = false
-): Promise<string | null> {
-  if (!geminiApiKey) {
-    console.error('Gemini API key not provided for SVG generation');
-    return null;
-  }
-
-  // MINI-SVG MODE: Optimized prompts to stay under token limits
-  const miniSvgInstructions = retryForCompletion 
-    ? `The previous SVG was cut off. Provide ONLY the remaining path data and the closing </svg> tag. Start exactly where it was truncated.`
-    : `You are an IELTS diagram generator. Generate a MINIMALIST SVG.
-
-${prompt}
-
-MINI-SVG MODE - CRITICAL RULES (Follow exactly):
-1. Output ONLY raw SVG code - no markdown, no commentary
-2. Start: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500">
-3. NO CSS, NO <style> tags, NO gradients, NO filters, NO <defs>
-4. NO <g> groups - use individual elements only
-5. Round ALL coordinates to 0 decimal places (integers only)
-6. Use SHORT hex colors: #fff, #000, #333, #666, #ccc, #39f, #f93
-7. Inline styles only: fill="", stroke="", font-size=""
-8. Font: Arial only, sizes 12-16px for labels, 18px for title
-9. Simple shapes: rect, circle, line, path, text, polyline
-10. Max 15-20 elements total for simple charts
-
-FORCE FINISH RULE:
-If running out of space, SKIP the legend and labels.
-PRIORITIZE finishing with </svg> above all else.
-The response MUST end with </svg>
-
-SPACE-SAVING TIPS:
-- Use path d="M x y L x y" for lines (no polyline)
-- Combine text elements where possible
-- Use short attribute names
-- Avoid whitespace and newlines`;
-
-  const maxRetries = 3;
-  const fetchTimeout = 30000; // 30 second timeout
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const promptType = retryForCompletion ? 'COMPLETION RETRY' : 'INITIAL';
-      console.log(`Generating SVG [${promptType}] (maxTokens: ${maxTokens}, attempt ${attempt + 1}/${maxRetries + 1})...`);
-
-      // Use AbortController for timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), fetchTimeout);
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: miniSvgInstructions }] }],
-            generationConfig: {
-              temperature: 0.5, // Lower temp for more consistent output
-              maxOutputTokens: maxTokens,
-            },
-          }),
-        }
-      );
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.log(`SVG generation failed (${response.status}): ${errorText}`);
-        
-        if (response.status === 429 && attempt < maxRetries) {
-          const delay = Math.min(3000 * Math.pow(2, attempt), 15000);
-          console.log(`Rate limited, waiting ${delay}ms before retry...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-        
-        if (response.status >= 500 && attempt < maxRetries) {
-          const delay = Math.min(2000 * Math.pow(2, attempt), 10000);
-          console.log(`Server error, waiting ${delay}ms before retry...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-        
-        return null;
-      }
-
-      const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      const finishReason = data.candidates?.[0]?.finishReason;
-      
-      if (text) {
-        console.log(`SVG response: ${text.length} chars, finishReason: ${finishReason}`);
-        console.log(`Preview: ${text.substring(0, 200)}...`);
-        
-        // Use smart SVG extraction with repair
-        let extractedSvg = extractSVG(text);
-        
-        // If truncated and this was initial attempt, try completion retry
-        if (finishReason === 'MAX_TOKENS' && !retryForCompletion && attempt < maxRetries) {
-          console.log('Response truncated - attempting completion retry...');
-          
-          // Try to get completion with the truncated content as context
-          const completionResult = await generateSvgWithGemini(
-            `Previous truncated SVG content:\n${text}\n\nComplete this SVG.`,
-            geminiApiKey,
-            maxTokens,
-            true // Mark as completion retry
-          );
-          
-          if (completionResult) {
-            // Try to merge the results
-            const mergedSvg = mergeTruncatedSvg(text, completionResult);
-            if (mergedSvg) {
-              console.log(`Successfully merged truncated SVG (${mergedSvg.length} chars)`);
-              return mergedSvg;
-            }
-          }
-        }
-        
-        if (extractedSvg && extractedSvg.length > 100) {
-          console.log(`SVG extracted successfully (${extractedSvg.length} chars)`);
-          return extractedSvg;
-        }
-        
-        console.log('SVG extraction failed or result too short');
-      } else {
-        console.log('Empty response from Gemini');
-      }
-      
-      if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        continue;
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        console.error(`SVG generation timed out after ${fetchTimeout}ms (attempt ${attempt + 1})`);
-      } else {
-        console.error(`SVG generation error (attempt ${attempt + 1}):`, err);
-      }
-      if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        continue;
-      }
-    }
-  }
-
-  console.error('SVG generation failed after all retries');
-  return null;
-}
-
-// Helper: Merge truncated SVG with completion
-function mergeTruncatedSvg(truncated: string, completion: string): string | null {
-  try {
-    // Extract SVG content from truncated (without closing tag)
-    let base = truncated.trim();
-    
-    // Remove any markdown code blocks
-    const codeBlockMatch = base.match(/```(?:svg|xml)?\s*\n?([\s\S]*)/);
-    if (codeBlockMatch) {
-      base = codeBlockMatch[1].trim();
-    }
-    
-    // Find SVG start
-    const svgStart = base.match(/<svg[^>]*>/i);
-    if (!svgStart) return null;
-    
-    const startIdx = base.indexOf(svgStart[0]);
-    base = base.substring(startIdx);
-    
-    // Remove incomplete closing if present
-    base = base.replace(/<\/svg>\s*$/i, '').replace(/<\/s[^>]*$/i, '');
-    
-    // Extract completion content (everything after svg start or just the content)
-    let completionContent = completion.trim();
-    
-    // Remove svg wrapper from completion if present
-    completionContent = completionContent.replace(/<svg[^>]*>/gi, '');
-    
-    // Keep only content before and including </svg>
-    const closingMatch = completionContent.match(/([\s\S]*<\/svg>)/i);
-    if (closingMatch) {
-      completionContent = closingMatch[1];
-    } else {
-      // No closing tag, add one
-      completionContent = completionContent + '</svg>';
-    }
-    
-    // Merge
-    const merged = base + completionContent;
-    
-    // Validate merged result
-    if (merged.includes('<svg') && merged.includes('</svg>')) {
-      return merged;
-    }
-    
-    return null;
-  } catch (err) {
-    console.error('Failed to merge truncated SVG:', err);
-    return null;
-  }
-}
-
-// Generate map SVG using Gemini - MINI-SVG MODE
-async function generateMapSvg(
-  mapDescription: string, 
-  mapLabels: Array<{id: string; text: string}>,
-  landmarks?: Array<{id: string; text: string}>,
-  geminiApiKey?: string
-): Promise<string | null> {
-  if (!geminiApiKey) {
-    console.error('Gemini API key not provided for map SVG generation');
-    return null;
-  }
-  
-  const answerPositions = mapLabels.map(l => l.id).join(', ');
-  const landmarksList = landmarks?.map(l => `"${l.text}"`).join(', ') || 'Main St, Park Ave';
-  
-  const svgPrompt = `Create MINIMAL map SVG for IELTS test.
-Map: ${mapDescription}
-
-MINI-SVG RULES:
-- viewBox="0 0 800 600"
-- NO CSS, NO <g>, NO gradients
-- Round coordinates to integers
-- SHORT colors: #fff #000 #333 #999 #ccc
-
-ANSWER POSITIONS (${answerPositions}): White circles r="14" with letter inside
-LANDMARKS: ${landmarksList} - labeled rects/lines
-
-Elements: rects for buildings, lines for roads, circles for markers
-Compass N arrow in corner
-MAX 25 elements total!
-
-FORCE FINISH: Skip labels if needed, MUST end with </svg>`;
-
-  console.log('Generating MINI-SVG map...');
-  return await generateSvgWithGemini(svgPrompt, geminiApiKey, 3000);
-}
-
-// Generate flowchart SVG - MINI-SVG MODE
-async function generateFlowchartSvg(
-  title: string, 
-  steps: Array<{label?: string; text?: string; isBlank?: boolean; questionNumber?: number}>,
-  geminiApiKey?: string
-): Promise<string | null> {
-  if (!geminiApiKey) {
-    console.error('Gemini API key not provided for flowchart generation');
-    return null;
-  }
-  
-  const stepDescriptions = steps.map((step, idx) => {
-    const stepText = step.label || step.text || '';
-    if (step.isBlank) return `Step ${idx + 1}: [BLANK ?]`;
-    return `Step ${idx + 1}: "${stepText.substring(0, 20)}"`;
-  }).join(', ');
-  
-  const svgPrompt = `Create MINIMAL flowchart SVG.
-Title: ${title || 'Process'}
-Steps: ${stepDescriptions}
-
-MINI-SVG RULES:
-- viewBox="0 0 600 800"
-- NO CSS, NO <g>, NO gradients
-- Round to integers, SHORT colors
-
-BOXES: Rects rx="5" fill="#f0f0f0" stroke="#333"
-ARROWS: Lines with small triangle markers
-BLANKS: Dashed stroke, "?" inside
-TITLE: Bold text at top
-
-Vertical flow, centered. MAX 20 elements!
-FORCE FINISH: MUST end with </svg>`;
-
-  console.log('Generating MINI-SVG flowchart...');
-  return await generateSvgWithGemini(svgPrompt, geminiApiKey, 3000);
-}
-// Generate chart/graph SVG for Writing Task 1 using Gemini text model
-// MINI-SVG MODE: Uses 3000 tokens max to stay under gateway limits
-async function generateWritingTask1Svg(
+// Generate chart data as JSON for Writing Task 1 visuals
+// Returns structured JSON that the frontend renders using CSS
+async function generateChartData(
   visualType: string,
   visualDescription: string,
   dataDescription: string,
-  geminiApiKey?: string
-): Promise<string | null> {
+  geminiApiKey: string
+): Promise<object | null> {
   if (!geminiApiKey) {
-    console.error('Gemini API key not provided for Writing Task 1 SVG generation');
+    console.error('Gemini API key not provided for chart data generation');
     return null;
   }
-  
-  console.log(`Generating MINI-SVG ${visualType} for Writing Task 1...`);
-  
-  // MINI-SVG MODE: Fixed 3000 token limit for all types
-  const maxTokens = 3000;
-  console.log(`Using MINI-SVG mode: maxTokens=${maxTokens} for ${visualType}`);
-  
-  // Build MINIMAL SVG prompt - focus on essential elements only
-  const miniSvgRules = `
-MINI-SVG MODE (CRITICAL - FOLLOW EXACTLY):
-- viewBox="0 0 800 500"
-- NO CSS, NO <style>, NO gradients, NO filters, NO <defs>, NO <g> groups
-- Round ALL numbers to integers (no decimals)
-- SHORT hex colors: #fff #000 #333 #39f #f93 #3c6 #c39
-- Max 15-20 elements total
-- Arial font only, sizes 12-16px
 
-FORCE FINISH: If running out of space, SKIP legend/labels.
-PRIORITIZE </svg> above all else!`;
+  console.log(`Generating JSON chart data for ${visualType}...`);
 
-  let svgPrompt = '';
+  // Build type-specific prompt for compact JSON output
+  let chartPrompt = '';
   
   switch (visualType?.toUpperCase()) {
     case 'BAR_CHART':
-      svgPrompt = `Create MINIMAL bar chart SVG.
-
+      chartPrompt = `Generate minified JSON for a bar chart.
 DATA: ${visualDescription} ${dataDescription}
 
-${miniSvgRules}
+Return ONLY this exact JSON structure (no markdown, no explanation):
+{"type":"BAR_CHART","title":"[short title]","xAxisLabel":"[label]","yAxisLabel":"[label]","data":[{"label":"[item]","value":[number]},{"label":"[item]","value":[number]}]}
 
-BARS: 4-6 vertical rects, distinct fills (#39f #f93 #3c6 #c39)
-AXES: 2 lines for x/y, short text labels
-TITLE: 1 text at top
-NO grid lines, NO legend - keep it simple!`;
+Use 4-6 data items with realistic values. Keep labels SHORT (max 15 chars).`;
       break;
-      
+
     case 'LINE_GRAPH':
-      svgPrompt = `Create MINIMAL line graph SVG.
-
+      chartPrompt = `Generate minified JSON for a line graph.
 DATA: ${visualDescription} ${dataDescription}
 
-${miniSvgRules}
+Return ONLY this exact JSON structure:
+{"type":"LINE_GRAPH","title":"[short title]","xAxisLabel":"[label]","yAxisLabel":"[label]","series":[{"name":"[series name]","data":[{"x":"[point]","y":[value]},{"x":"[point]","y":[value]}]}]}
 
-LINES: 1-2 polylines or paths, stroke-width="2"
-POINTS: Small circles r="3" at key data points
-AXES: 2 lines, minimal labels
-TITLE: 1 text at top
-NO grid, NO legend!`;
+Use 5-7 x-axis points. Keep names SHORT.`;
       break;
-      
+
     case 'PIE_CHART':
-      svgPrompt = `Create MINIMAL pie chart SVG.
-
+      chartPrompt = `Generate minified JSON for a pie chart.
 DATA: ${visualDescription} ${dataDescription}
 
-${miniSvgRules}
+Return ONLY this exact JSON structure:
+{"type":"PIE_CHART","title":"[short title]","data":[{"label":"[segment]","value":[percent as whole number]},{"label":"[segment]","value":[percent]}]}
 
-PIE: Center cx="400" cy="250" r="120"
-MAX 4-5 segments using path with arc commands
-LABELS: % inside or near segments
-TITLE: 1 text at top
-NO legend box - use labels only!`;
+Use 4-6 segments. Values should sum to 100. Keep labels SHORT.`;
       break;
-      
+
     case 'TABLE':
-      svgPrompt = `Create MINIMAL table SVG.
-
+      chartPrompt = `Generate minified JSON for a data table.
 DATA: ${visualDescription} ${dataDescription}
 
-${miniSvgRules}
+Return ONLY this exact JSON structure:
+{"type":"TABLE","title":"[short title]","headers":["Header1","Header2","Header3"],"rows":[[{"value":"cell1"},{"value":"cell2"},{"value":"cell3"}],[{"value":"cell1"},{"value":"cell2"},{"value":"cell3"}]]}
 
-TABLE: Rect borders, max 4 cols x 5 rows
-HEADER: Gray fill #ccc
-CELLS: Text centered, font-size="12"
-TITLE: 1 text at top
-Keep content SHORT!`;
+Use 3-4 columns and 4-5 rows. Keep values SHORT.`;
       break;
-      
+
     case 'PROCESS_DIAGRAM':
-      svgPrompt = `Create MINIMAL process diagram SVG.
-
+      chartPrompt = `Generate minified JSON for a process diagram.
 DATA: ${visualDescription} ${dataDescription}
 
-${miniSvgRules}
+Return ONLY this exact JSON structure:
+{"type":"PROCESS_DIAGRAM","title":"[short title]","steps":[{"label":"[step name]","description":"[brief desc]"},{"label":"[step name]","description":"[brief desc]"}]}
 
-STEPS: 4-6 rects with rx="5"
-ARROWS: Simple lines with small triangles
-LABELS: Short text inside boxes
-TITLE: 1 text at top
-Vertical or horizontal flow!`;
+Use 4-6 steps. Keep descriptions under 50 chars.`;
       break;
-      
+
     case 'MAP':
-      svgPrompt = `Create MINIMAL map comparison SVG.
-
+      chartPrompt = `Generate minified JSON for a map comparison.
 DATA: ${visualDescription} ${dataDescription}
 
-${miniSvgRules}
+Return ONLY this exact JSON structure:
+{"type":"MAP","title":"[short title]","mapData":{"before":{"year":"[year]","features":[{"label":"[feature]","type":"building"},{"label":"[feature]","type":"road"}]},"after":{"year":"[year]","features":[{"label":"[new feature]","type":"building"},{"label":"[feature]","type":"park"}]}}}
 
-TWO MAPS: Side by side, each ~350px wide
-SHAPES: Simple rects for buildings, lines for roads
-LABELS: Year above each map
-LEGEND: Just color boxes at bottom
-Keep features to minimum!`;
+Types: building, road, park, water, other. Use 4-6 features per map.`;
       break;
-      
+
     case 'MIXED_CHARTS':
-      svgPrompt = `Create MINIMAL dual chart SVG.
-
+      chartPrompt = `Generate minified JSON for two related charts.
 DATA: ${visualDescription} ${dataDescription}
 
-${miniSvgRules}
+Return ONLY this exact JSON structure:
+{"type":"MIXED_CHARTS","title":"[overall title]","charts":[{"type":"BAR_CHART","title":"[chart1 title]","data":[{"label":"A","value":50},{"label":"B","value":30}]},{"type":"PIE_CHART","title":"[chart2 title]","data":[{"label":"X","value":60},{"label":"Y","value":40}]}]}
 
-LEFT CHART (x:50-380): Simple bar or line
-RIGHT CHART (x:420-780): Simple pie or bar
-TITLE: 1 shared title at top
-MAX 10 elements per chart!`;
+Use simple data for each chart.`;
       break;
-      
-    default:
-      svgPrompt = `Create MINIMAL chart SVG.
 
+    default:
+      // Default to bar chart
+      chartPrompt = `Generate minified JSON for a bar chart.
 DATA: ${visualDescription} ${dataDescription}
 
-${miniSvgRules}
+Return ONLY this exact JSON structure:
+{"type":"BAR_CHART","title":"[short title]","data":[{"label":"[item]","value":[number]}]}
 
-Choose simplest visualization for the data.
-Max 20 elements total!`;
+Use 4-6 data items. Keep labels SHORT.`;
   }
 
-  return await generateSvgWithGemini(svgPrompt, geminiApiKey, maxTokens);
+  // Add universal instructions
+  chartPrompt += `
+
+CRITICAL RULES:
+- Output ONLY the JSON object, nothing else
+- No markdown code blocks, no explanation text
+- Keep total response under 200 characters if possible
+- Use whole numbers for values
+- Keep all text labels SHORT (max 15 characters)`;
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: chartPrompt }] }],
+          generationConfig: {
+            temperature: 0.3, // Low temp for consistent JSON
+            maxOutputTokens: 500, // Much smaller than SVG needed
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      console.error(`Chart data generation failed: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    if (!text) {
+      console.error('Empty response from Gemini for chart data');
+      return null;
+    }
+
+    console.log(`Chart data response: ${text.length} chars`);
+    console.log(`Raw response: ${text.substring(0, 300)}`);
+
+    // Extract JSON from response
+    const jsonStr = extractJsonFromResponse(text);
+    const chartData = JSON.parse(jsonStr);
+    
+    // Validate required fields
+    if (!chartData.type) {
+      console.error('Chart data missing type field');
+      return null;
+    }
+
+    console.log(`Chart data generated successfully: ${chartData.type}`);
+    return chartData;
+
+  } catch (err) {
+    console.error('Chart data generation error:', err);
+    return null;
+  }
 }
+
+// Note: Old SVG generation functions (mergeTruncatedSvg, generateMapSvg, 
+// generateFlowchartSvg, generateWritingTask1Svg) have been removed.
+// Chart data is now generated as JSON using generateChartData() above.
 
 async function uploadGeneratedImage(
   supabaseClient: any, 
@@ -2278,42 +1962,20 @@ serve(async (req) => {
           use_dropdown: true
         };
       } else if (questionType === 'FLOWCHART_COMPLETION') {
-        // Generate flowchart SVG for reading tests
-        let flowchartSvg: string | undefined;
-        if (parsed.flowchart_steps) {
-          console.log('Generating flowchart SVG for reading FLOWCHART_COMPLETION...');
-          const svgCode = await generateFlowchartSvg(
-            parsed.flowchart_title || 'Process Flowchart',
-            parsed.flowchart_steps,
-            geminiApiKey
-          );
-          if (svgCode) {
-            flowchartSvg = svgCode;
-          }
-        }
+        // Flowchart data is stored as structured JSON, rendered on frontend
         groupOptions = { 
           flowchart_title: parsed.flowchart_title,
           flowchart_steps: parsed.flowchart_steps,
-          svgCode: flowchartSvg, // SVG code for direct rendering
         };
       } else if (questionType === 'TABLE_COMPLETION') {
         groupOptions = { table_data: parsed.table_data };
       } else if (questionType === 'NOTE_COMPLETION') {
         groupOptions = { note_sections: parsed.note_sections };
       } else if (questionType === 'MAP_LABELING') {
-        // Generate map SVG for reading tests
-        let mapSvg: string | undefined;
-        if (parsed.map_description && parsed.map_labels) {
-          console.log('Generating map SVG for reading MAP_LABELING...');
-          const svgCode = await generateMapSvg(parsed.map_description, parsed.map_labels, undefined, geminiApiKey);
-          if (svgCode) {
-            mapSvg = svgCode;
-          }
-        }
+        // Map data is stored as structured JSON, rendered on frontend
         groupOptions = { 
           map_description: parsed.map_description,
           map_labels: parsed.map_labels,
-          svgCode: mapSvg, // SVG code for direct rendering
         };
       } else if (questionType.includes('MULTIPLE_CHOICE') && parsed.questions?.[0]?.options) {
         // For MCQ Multiple, store max_answers + option_format at GROUP level so UI + navigation can read it.
@@ -2499,21 +2161,11 @@ serve(async (req) => {
         const shuffledDragOptions = [...(parsed.drag_options || [])].sort(() => Math.random() - 0.5);
         groupOptions = { options: shuffledDragOptions, option_format: 'A' };
       } else if (questionType === 'MAP_LABELING') {
-        // Generate map SVG using Gemini text model
-        let mapSvg: string | undefined;
-        if (parsed.map_description && parsed.map_labels) {
-          console.log('Generating map SVG for MAP_LABELING...');
-          const svgCode = await generateMapSvg(parsed.map_description, parsed.map_labels, parsed.landmarks, geminiApiKey);
-          if (svgCode) {
-            mapSvg = svgCode;
-          }
-        }
-        
+        // Map data is stored as structured JSON, rendered on frontend
         groupOptions = {
           map_description: parsed.map_description,
           map_labels: parsed.map_labels,
           landmarks: parsed.landmarks || [],
-          svgCode: mapSvg, // SVG code for direct rendering
           dropZones: [],
           options: [],
         };
@@ -2722,11 +2374,11 @@ Return ONLY valid JSON:
           const jsonStr = extractJsonFromResponse(result);
           const parsed = JSON.parse(jsonStr);
           
-          // For Task 1, generate SVG instead of image
-          let svgCode: string | null = null;
+          // For Task 1, generate chart data as JSON (not SVG)
+          let chartData: object | null = null;
           if (isTask1 && parsed.visual_description) {
-            console.log(`Generating SVG for Task 1: ${parsed.visual_type}`);
-            svgCode = await generateWritingTask1Svg(
+            console.log(`Generating chart data for Task 1: ${parsed.visual_type}`);
+            chartData = await generateChartData(
               parsed.visual_type || visualType,
               parsed.visual_description,
               parsed.data_description || '',
@@ -2739,7 +2391,7 @@ Return ONLY valid JSON:
             task_type: isTask1 ? 'task1' : 'task2',
             instruction: parsed.instruction,
             image_description: parsed.visual_description,
-            svgCode: svgCode, // SVG code for direct rendering
+            chartData: chartData, // JSON chart data for frontend rendering
             visual_type: parsed.visual_type,
             essay_type: parsed.essay_type,
             word_limit_min: isTask1 ? 150 : 250,
