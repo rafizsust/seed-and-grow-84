@@ -80,6 +80,68 @@ let lastGeminiError: string | null = null;
 let lastTokensUsed: number = 0;
 let isQuotaExceeded: boolean = false;
 
+// Pre-flight validation: Make a tiny test request to check if API key is rate-limited
+async function preflightApiCheck(apiKey: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    console.log('Running pre-flight API validation...');
+    
+    // Use the smallest, fastest model with a minimal prompt
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Reply with just: OK' }] }],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 5,
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      const errorStatus = errorData?.error?.status || '';
+      const errorMessage = errorData?.error?.message || '';
+      
+      console.error('Pre-flight check failed:', response.status, errorStatus);
+      
+      if (response.status === 429 || errorStatus === 'RESOURCE_EXHAUSTED') {
+        return {
+          ok: false,
+          error: 'QUOTA_EXCEEDED: Your Gemini API has reached its rate limit. This may include usage from other platforms (Google AI Studio, other apps). Please wait a few minutes before trying again.',
+        };
+      } else if (response.status === 403 || errorStatus === 'PERMISSION_DENIED') {
+        return {
+          ok: false,
+          error: 'API_KEY_INVALID: Your Gemini API key appears to be invalid or lacks permissions. Please verify your API key in settings.',
+        };
+      } else if (response.status === 400) {
+        return {
+          ok: false,
+          error: 'API_ERROR: Invalid request. Please check your API key configuration.',
+        };
+      }
+      
+      return {
+        ok: false,
+        error: `API_ERROR: Gemini API returned error ${response.status}: ${errorMessage.slice(0, 100)}`,
+      };
+    }
+
+    console.log('Pre-flight API check passed');
+    return { ok: true };
+  } catch (err) {
+    console.error('Pre-flight check connection error:', err);
+    return {
+      ok: false,
+      error: 'CONNECTION_ERROR: Unable to reach Gemini API. Please check your internet connection.',
+    };
+  }
+}
+
 // Update quota tracking in the database
 async function updateQuotaTracking(supabase: any, userId: string, tokensUsed: number): Promise<void> {
   if (!userId || tokensUsed <= 0) return;
@@ -1904,6 +1966,24 @@ serve(async (req) => {
     if (!appEncryptionKey) throw new Error('Encryption key not configured');
     
     const geminiApiKey = await decryptApiKey(secretData.encrypted_value, appEncryptionKey);
+
+    // Pre-flight validation: Check if API key is rate-limited before expensive operations
+    const preflightResult = await preflightApiCheck(geminiApiKey);
+    if (!preflightResult.ok) {
+      console.error('Pre-flight API check failed:', preflightResult.error);
+      const isQuota = preflightResult.error?.startsWith('QUOTA_EXCEEDED');
+      return new Response(JSON.stringify({ 
+        error: preflightResult.error,
+        errorType: isQuota ? 'QUOTA_EXCEEDED' : 'API_ERROR',
+        suggestion: isQuota 
+          ? 'Your API key may have been used on other platforms. Check usage at aistudio.google.com or wait a few minutes.'
+          : 'Please verify your API key in settings.',
+        preflightFailed: true
+      }), {
+        status: isQuota ? 429 : 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // Parse request
     const body = await req.json();
