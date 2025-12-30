@@ -354,59 +354,111 @@ function extractJsonFromResponse(text: string): string {
   throw new Error('Could not extract valid JSON from AI response');
 }
 
-// Generate image using Lovable AI Gateway (no user API key needed)
-async function generateImageWithLovableGateway(prompt: string): Promise<string | null> {
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-  if (!LOVABLE_API_KEY) {
-    console.error('LOVABLE_API_KEY not configured for image generation');
+// Generate image using Google's Imagen model (free with user's Gemini API key)
+async function generateImageWithGemini(prompt: string, geminiApiKey: string): Promise<string | null> {
+  if (!geminiApiKey) {
+    console.error('Gemini API key not provided for image generation');
     return null;
   }
 
-  try {
-    console.log('Generating image with Lovable AI Gateway...');
+  // Try multiple Imagen models in order of preference
+  const imagenModels = [
+    'imagen-3.0-generate-001',
+    'imagen-3.0-generate-002',
+    'imagegeneration@006'
+  ];
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash-image-preview",
-        messages: [{ role: "user", content: prompt }],
-        modalities: ["image", "text"],
-      }),
-    });
+  for (const model of imagenModels) {
+    try {
+      console.log(`Trying image generation with model: ${model}...`);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Lovable AI Gateway image generation failed:', response.status, errorText);
-      return null;
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${geminiApiKey}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            instances: [{ prompt }],
+            parameters: {
+              sampleCount: 1,
+              aspectRatio: "1:1"
+            }
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log(`Model ${model} failed: ${response.status} - ${errorText}`);
+        
+        // If model not found, try next model
+        if (response.status === 404) {
+          continue;
+        }
+        
+        // For rate limits, wait and retry with same model once
+        if (response.status === 429) {
+          console.log('Rate limited, waiting 5 seconds before retry...');
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          
+          const retryResponse = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${geminiApiKey}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                instances: [{ prompt }],
+                parameters: { sampleCount: 1, aspectRatio: "1:1" }
+              }),
+            }
+          );
+          
+          if (retryResponse.ok) {
+            const retryData = await retryResponse.json();
+            const imageBytes = retryData.predictions?.[0]?.bytesBase64Encoded;
+            if (imageBytes) {
+              console.log(`Image generated successfully with ${model} (after retry)`);
+              return `data:image/png;base64,${imageBytes}`;
+            }
+          }
+        }
+        
+        continue;
+      }
+
+      const data = await response.json();
+      const imageBytes = data.predictions?.[0]?.bytesBase64Encoded;
+      
+      if (imageBytes) {
+        console.log(`Image generated successfully with ${model}`);
+        return `data:image/png;base64,${imageBytes}`;
+      }
+      
+      console.log(`No image data from ${model}, trying next...`);
+    } catch (err) {
+      console.error(`Error with model ${model}:`, err);
+      continue;
     }
-
-    const data = await response.json();
-    const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-    
-    if (imageUrl) {
-      console.log('Image generated successfully via Lovable AI Gateway');
-      return imageUrl;
-    }
-    
-    console.error('No image data in Lovable AI Gateway response');
-    return null;
-  } catch (err) {
-    console.error('Lovable AI Gateway image generation error:', err);
-    return null;
   }
+
+  console.error('All Imagen models failed for image generation');
+  return null;
 }
 
-// Generate map image using Lovable AI Gateway
+// Generate map image using Gemini Imagen
 async function generateMapImage(
   mapDescription: string, 
   mapLabels: Array<{id: string; text: string}>,
   landmarks?: Array<{id: string; text: string}>,
-  _geminiApiKey?: string // Kept for backward compatibility, but not used
+  geminiApiKey?: string
 ): Promise<string | null> {
+  if (!geminiApiKey) {
+    console.error('Gemini API key not provided for map generation');
+    return null;
+  }
+  
   const answerPositions = mapLabels.map(l => l.id).join(', ');
   const landmarksList = landmarks?.map(l => `${l.text}`).join(', ') || 'streets and pathways';
   
@@ -423,15 +475,20 @@ CRITICAL INSTRUCTIONS:
 - The reference landmarks should have their names visible on the map`;
 
   console.log('Generating map image for IELTS test...');
-  return await generateImageWithLovableGateway(imagePrompt);
+  return await generateImageWithGemini(imagePrompt, geminiApiKey);
 }
 
-// Generate flowchart image using Lovable AI Gateway
+// Generate flowchart image using Gemini Imagen
 async function generateFlowchartImage(
   title: string, 
   steps: Array<{label?: string; text?: string; isBlank?: boolean; questionNumber?: number}>,
-  _geminiApiKey?: string // Kept for backward compatibility, but not used
+  geminiApiKey?: string
 ): Promise<string | null> {
+  if (!geminiApiKey) {
+    console.error('Gemini API key not provided for flowchart generation');
+    return null;
+  }
+  
   // Build step descriptions for the prompt
   const stepDescriptions = steps.map((step, idx) => {
     const stepText = step.label || step.text || '';
@@ -456,15 +513,20 @@ Style requirements:
 - Professional appearance suitable for a test`;
 
   console.log('Generating flowchart image for IELTS test...');
-  return await generateImageWithLovableGateway(imagePrompt);
+  return await generateImageWithGemini(imagePrompt, geminiApiKey);
 }
-// Generate chart/graph image for Writing Task 1 using Lovable AI Gateway
+// Generate chart/graph image for Writing Task 1 using Gemini Imagen
 async function generateWritingTask1Image(
   visualType: string,
   visualDescription: string,
   dataDescription: string,
-  _geminiApiKey?: string // Kept for backward compatibility, but not used
+  geminiApiKey?: string
 ): Promise<string | null> {
+  if (!geminiApiKey) {
+    console.error('Gemini API key not provided for Writing Task 1 image generation');
+    return null;
+  }
+  
   console.log(`Generating ${visualType} image for Writing Task 1...`);
   
   // Build a detailed prompt based on visual type
@@ -601,7 +663,7 @@ Style requirements:
 - Ultra high resolution, crisp graphics`;
   }
 
-  return await generateImageWithLovableGateway(imagePrompt);
+  return await generateImageWithGemini(imagePrompt, geminiApiKey);
 }
 
 async function uploadGeneratedImage(
