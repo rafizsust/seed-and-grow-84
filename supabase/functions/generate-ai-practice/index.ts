@@ -409,59 +409,79 @@ function extractSVG(text: string): string | null {
   return null;
 }
 
-// Generate SVG code using Gemini text models (no image API required)
+// Generate SVG code using Gemini text models - MINI-SVG MODE
+// Uses minimalist SVG to stay under gateway token limits
 // Returns valid SVG code that can be rendered directly in the browser
-// maxTokens parameter allows different limits for different use cases
 async function generateSvgWithGemini(
   prompt: string, 
   geminiApiKey: string, 
-  maxTokens: number = 4096
+  maxTokens: number = 3000,
+  retryForCompletion: boolean = false
 ): Promise<string | null> {
   if (!geminiApiKey) {
     console.error('Gemini API key not provided for SVG generation');
     return null;
   }
 
-  const svgPrompt = `You are an IELTS diagram generator. Generate a professional, academic-style SVG.
+  // MINI-SVG MODE: Optimized prompts to stay under token limits
+  const miniSvgInstructions = retryForCompletion 
+    ? `The previous SVG was cut off. Provide ONLY the remaining path data and the closing </svg> tag. Start exactly where it was truncated.`
+    : `You are an IELTS diagram generator. Generate a MINIMALIST SVG.
 
 ${prompt}
 
-CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE EXACTLY:
-1. Output ONLY raw SVG code - no explanations, no markdown, no commentary
-2. Start with <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
-3. End with </svg> - YOU MUST COMPLETE THE ENTIRE SVG CODE
-4. Use high-contrast colors, clear Arial font, ensure all labels are legible
-5. Keep design clean and professional - suitable for academic exams
-6. White/light background (#ffffff or #f8f9fa), dark text (#333333)
-7. DO NOT stop halfway - complete all elements before the closing </svg> tag
+MINI-SVG MODE - CRITICAL RULES (Follow exactly):
+1. Output ONLY raw SVG code - no markdown, no commentary
+2. Start: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500">
+3. NO CSS, NO <style> tags, NO gradients, NO filters, NO <defs>
+4. NO <g> groups - use individual elements only
+5. Round ALL coordinates to 0 decimal places (integers only)
+6. Use SHORT hex colors: #fff, #000, #333, #666, #ccc, #39f, #f93
+7. Inline styles only: fill="", stroke="", font-size=""
+8. Font: Arial only, sizes 12-16px for labels, 18px for title
+9. Simple shapes: rect, circle, line, path, text, polyline
+10. Max 15-20 elements total for simple charts
 
-TECHNICAL REQUIREMENTS:
-- Use simple shapes: rect, circle, line, path, text
-- No complex gradients or filters
-- Font-family: Arial, sans-serif
-- Font-size: 12-16px for labels, 18-20px for titles
-- Ensure proper spacing and alignment`;
+FORCE FINISH RULE:
+If running out of space, SKIP the legend and labels.
+PRIORITIZE finishing with </svg> above all else.
+The response MUST end with </svg>
 
-  const maxRetries = 2;
+SPACE-SAVING TIPS:
+- Use path d="M x y L x y" for lines (no polyline)
+- Combine text elements where possible
+- Use short attribute names
+- Avoid whitespace and newlines`;
+
+  const maxRetries = 3;
+  const fetchTimeout = 30000; // 30 second timeout
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`Generating SVG with Gemini (maxTokens: ${maxTokens})${attempt > 0 ? ` (retry ${attempt})` : ''}...`);
+      const promptType = retryForCompletion ? 'COMPLETION RETRY' : 'INITIAL';
+      console.log(`Generating SVG [${promptType}] (maxTokens: ${maxTokens}, attempt ${attempt + 1}/${maxRetries + 1})...`);
+
+      // Use AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), fetchTimeout);
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify({
-            contents: [{ parts: [{ text: svgPrompt }] }],
+            contents: [{ parts: [{ text: miniSvgInstructions }] }],
             generationConfig: {
-              temperature: 0.7,
+              temperature: 0.5, // Lower temp for more consistent output
               maxOutputTokens: maxTokens,
             },
           }),
         }
       );
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -488,18 +508,34 @@ TECHNICAL REQUIREMENTS:
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
       const finishReason = data.candidates?.[0]?.finishReason;
       
-      if (finishReason === 'MAX_TOKENS') {
-        console.log('WARNING: Response was truncated due to max tokens limit');
-      }
-      
       if (text) {
-        // Log response info for debugging
-        console.log(`SVG response length: ${text.length} chars, finishReason: ${finishReason}`);
-        console.log(`SVG response preview (first 300 chars): ${text.substring(0, 300)}`);
-        console.log(`SVG response ending (last 200 chars): ${text.substring(text.length - 200)}`);
+        console.log(`SVG response: ${text.length} chars, finishReason: ${finishReason}`);
+        console.log(`Preview: ${text.substring(0, 200)}...`);
         
-        // Use smart SVG extraction
-        const extractedSvg = extractSVG(text);
+        // Use smart SVG extraction with repair
+        let extractedSvg = extractSVG(text);
+        
+        // If truncated and this was initial attempt, try completion retry
+        if (finishReason === 'MAX_TOKENS' && !retryForCompletion && attempt < maxRetries) {
+          console.log('Response truncated - attempting completion retry...');
+          
+          // Try to get completion with the truncated content as context
+          const completionResult = await generateSvgWithGemini(
+            `Previous truncated SVG content:\n${text}\n\nComplete this SVG.`,
+            geminiApiKey,
+            maxTokens,
+            true // Mark as completion retry
+          );
+          
+          if (completionResult) {
+            // Try to merge the results
+            const mergedSvg = mergeTruncatedSvg(text, completionResult);
+            if (mergedSvg) {
+              console.log(`Successfully merged truncated SVG (${mergedSvg.length} chars)`);
+              return mergedSvg;
+            }
+          }
+        }
         
         if (extractedSvg && extractedSvg.length > 100) {
           console.log(`SVG extracted successfully (${extractedSvg.length} chars)`);
@@ -516,7 +552,11 @@ TECHNICAL REQUIREMENTS:
         continue;
       }
     } catch (err) {
-      console.error(`SVG generation error (attempt ${attempt + 1}):`, err);
+      if (err instanceof Error && err.name === 'AbortError') {
+        console.error(`SVG generation timed out after ${fetchTimeout}ms (attempt ${attempt + 1})`);
+      } else {
+        console.error(`SVG generation error (attempt ${attempt + 1}):`, err);
+      }
       if (attempt < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, 2000));
         continue;
@@ -528,9 +568,59 @@ TECHNICAL REQUIREMENTS:
   return null;
 }
 
-// Generate map SVG using Gemini text model
-// OFFICIAL IELTS FORMAT: Answer positions (A-H) shown as CIRCLES WITH LETTER ONLY (no place names!)
-// Supporting landmarks (streets, reference buildings) shown WITH text labels for navigation
+// Helper: Merge truncated SVG with completion
+function mergeTruncatedSvg(truncated: string, completion: string): string | null {
+  try {
+    // Extract SVG content from truncated (without closing tag)
+    let base = truncated.trim();
+    
+    // Remove any markdown code blocks
+    const codeBlockMatch = base.match(/```(?:svg|xml)?\s*\n?([\s\S]*)/);
+    if (codeBlockMatch) {
+      base = codeBlockMatch[1].trim();
+    }
+    
+    // Find SVG start
+    const svgStart = base.match(/<svg[^>]*>/i);
+    if (!svgStart) return null;
+    
+    const startIdx = base.indexOf(svgStart[0]);
+    base = base.substring(startIdx);
+    
+    // Remove incomplete closing if present
+    base = base.replace(/<\/svg>\s*$/i, '').replace(/<\/s[^>]*$/i, '');
+    
+    // Extract completion content (everything after svg start or just the content)
+    let completionContent = completion.trim();
+    
+    // Remove svg wrapper from completion if present
+    completionContent = completionContent.replace(/<svg[^>]*>/gi, '');
+    
+    // Keep only content before and including </svg>
+    const closingMatch = completionContent.match(/([\s\S]*<\/svg>)/i);
+    if (closingMatch) {
+      completionContent = closingMatch[1];
+    } else {
+      // No closing tag, add one
+      completionContent = completionContent + '</svg>';
+    }
+    
+    // Merge
+    const merged = base + completionContent;
+    
+    // Validate merged result
+    if (merged.includes('<svg') && merged.includes('</svg>')) {
+      return merged;
+    }
+    
+    return null;
+  } catch (err) {
+    console.error('Failed to merge truncated SVG:', err);
+    return null;
+  }
+}
+
+// Generate map SVG using Gemini - MINI-SVG MODE
 async function generateMapSvg(
   mapDescription: string, 
   mapLabels: Array<{id: string; text: string}>,
@@ -542,44 +632,32 @@ async function generateMapSvg(
     return null;
   }
   
-  // Answer positions are just letters A-H (NO place names - test takers must figure these out)
   const answerPositions = mapLabels.map(l => l.id).join(', ');
+  const landmarksList = landmarks?.map(l => `"${l.text}"`).join(', ') || 'Main St, Park Ave';
   
-  // Landmarks ARE labeled with text - these help navigation (streets, known buildings)
-  const landmarksList = landmarks?.map(l => `"${l.text}"`).join(', ') || 'Main Street, Park Avenue';
-  
-  const svgPrompt = `Create an SVG map diagram for an IELTS listening/reading test.
-Map layout: ${mapDescription}
+  const svgPrompt = `Create MINIMAL map SVG for IELTS test.
+Map: ${mapDescription}
 
-CRITICAL IELTS OFFICIAL FORMAT - ANSWER POSITIONS vs LANDMARKS:
-1. ANSWER POSITIONS (${answerPositions}): Draw as WHITE CIRCLES with BLACK border containing ONLY the letter (A, B, C, etc.)
-   - These mark where unknown locations are - the test taker must identify them
-   - DO NOT show any place names next to these circles - ONLY the letter!
-   - Circles should be ~28-32px diameter, clearly visible
+MINI-SVG RULES:
+- viewBox="0 0 800 600"
+- NO CSS, NO <g>, NO gradients
+- Round coordinates to integers
+- SHORT colors: #fff #000 #333 #999 #ccc
 
-2. LABELED LANDMARKS (for navigation): ${landmarksList}
-   - These ARE labeled with text names (e.g., "Main Street", "Bank", "Café")
-   - These help test takers navigate and understand directions in the audio/passage
-   - Draw as rectangles or street names with readable text labels
+ANSWER POSITIONS (${answerPositions}): White circles r="14" with letter inside
+LANDMARKS: ${landmarksList} - labeled rects/lines
 
-SVG TECHNICAL REQUIREMENTS:
-- Valid SVG with viewBox="0 0 800 600"
-- White (#ffffff) or very light gray (#f8f9fa) background rectangle
-- Architectural/floor plan style: clean lines, simple shapes
-- Roads: gray lines (#999) or dashed paths
-- Buildings: light gray rectangles (#e8e8e8) with dark border (#333)
-- Compass (N/E/S/W) in top-right corner
-- Font-size 12-14px for all text
-- CRITICAL TEXT WRAPPING: Keep all text labels SHORT (max 12 characters per line)
-  - For longer names, use <tspan> elements to wrap to multiple lines
-  - Example: <text><tspan x="100" dy="0">Community</tspan><tspan x="100" dy="14">Center</tspan></text>
-- Professional exam-quality appearance`;
+Elements: rects for buildings, lines for roads, circles for markers
+Compass N arrow in corner
+MAX 25 elements total!
 
-  console.log('Generating map SVG for IELTS test...');
-  return await generateSvgWithGemini(svgPrompt, geminiApiKey);
+FORCE FINISH: Skip labels if needed, MUST end with </svg>`;
+
+  console.log('Generating MINI-SVG map...');
+  return await generateSvgWithGemini(svgPrompt, geminiApiKey, 3000);
 }
 
-// Generate flowchart SVG using Gemini text model
+// Generate flowchart SVG - MINI-SVG MODE
 async function generateFlowchartSvg(
   title: string, 
   steps: Array<{label?: string; text?: string; isBlank?: boolean; questionNumber?: number}>,
@@ -590,38 +668,34 @@ async function generateFlowchartSvg(
     return null;
   }
   
-  // Build step descriptions for the prompt
   const stepDescriptions = steps.map((step, idx) => {
     const stepText = step.label || step.text || '';
-    if (step.isBlank) {
-      return `Step ${idx + 1}: [BLANK ${step.questionNumber || idx + 1}] (empty box with "?" inside)`;
-    }
-    return `Step ${idx + 1}: "${stepText}"`;
-  }).join('\n');
+    if (step.isBlank) return `Step ${idx + 1}: [BLANK ?]`;
+    return `Step ${idx + 1}: "${stepText.substring(0, 20)}"`;
+  }).join(', ');
   
-  const svgPrompt = `Create an SVG flowchart diagram for an IELTS listening test.
-Title: ${title || 'Process Flowchart'}
+  const svgPrompt = `Create MINIMAL flowchart SVG.
+Title: ${title || 'Process'}
+Steps: ${stepDescriptions}
 
-The flowchart has the following steps connected by arrows flowing downward:
-${stepDescriptions}
+MINI-SVG RULES:
+- viewBox="0 0 600 800"
+- NO CSS, NO <g>, NO gradients
+- Round to integers, SHORT colors
 
-CRITICAL SVG REQUIREMENTS:
-- Create valid SVG code with viewBox="0 0 600 800"
-- White (#ffffff) background rectangle
-- Vertical flow from top to bottom, centered
-- Title at top in bold, font-size 20px
-- Each step in a rounded rectangle (rx="8") with light gray fill (#f0f0f0) and dark border (#333)
-- Clear downward arrows between steps (use polygon or path for arrowheads)
-- Blank steps should have dashed border and show "?" with question number
-- Text inside boxes in black, font-size 14px, centered
-- Consistent spacing between elements (about 60px between boxes)
-- Professional, clean appearance suitable for an exam`;
+BOXES: Rects rx="5" fill="#f0f0f0" stroke="#333"
+ARROWS: Lines with small triangle markers
+BLANKS: Dashed stroke, "?" inside
+TITLE: Bold text at top
 
-  console.log('Generating flowchart SVG for IELTS test...');
-  return await generateSvgWithGemini(svgPrompt, geminiApiKey);
+Vertical flow, centered. MAX 20 elements!
+FORCE FINISH: MUST end with </svg>`;
+
+  console.log('Generating MINI-SVG flowchart...');
+  return await generateSvgWithGemini(svgPrompt, geminiApiKey, 3000);
 }
 // Generate chart/graph SVG for Writing Task 1 using Gemini text model
-// Uses higher token limit (8000) for complex charts like Pie Charts and Mixed Charts
+// MINI-SVG MODE: Uses 3000 tokens max to stay under gateway limits
 async function generateWritingTask1Svg(
   visualType: string,
   visualDescription: string,
@@ -633,207 +707,135 @@ async function generateWritingTask1Svg(
     return null;
   }
   
-  console.log(`Generating ${visualType} SVG for Writing Task 1...`);
+  console.log(`Generating MINI-SVG ${visualType} for Writing Task 1...`);
   
-  // Determine token limit based on complexity
-  // Pie charts, mixed charts, and maps need more tokens for arc calculations and detailed elements
-  const complexTypes = ['PIE_CHART', 'MIXED_CHARTS', 'MAP', 'PROCESS_DIAGRAM'];
-  const isComplex = complexTypes.includes(visualType?.toUpperCase());
-  const maxTokens = isComplex ? 8000 : 6000;
+  // MINI-SVG MODE: Fixed 3000 token limit for all types
+  const maxTokens = 3000;
+  console.log(`Using MINI-SVG mode: maxTokens=${maxTokens} for ${visualType}`);
   
-  console.log(`Using maxTokens: ${maxTokens} for ${visualType} (complex: ${isComplex})`);
-  
-  // Build SVG-specific prompt based on visual type
-  let svgPrompt = '';
-  const baseStyle = `
-CRITICAL SVG REQUIREMENTS - READ CAREFULLY:
-- Create valid SVG code with viewBox="0 0 800 500"
-- Start with: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500">
-- Add white background: <rect width="800" height="500" fill="#ffffff"/>
-- Use font-family="Arial, sans-serif" for all text
-- Black text (#333333) for all labels
-- Professional, clean appearance suitable for an academic exam
-- Clear title at the top in bold, font-size 18px
-- Axis labels and legend with font-size 12-14px
+  // Build MINIMAL SVG prompt - focus on essential elements only
+  const miniSvgRules = `
+MINI-SVG MODE (CRITICAL - FOLLOW EXACTLY):
+- viewBox="0 0 800 500"
+- NO CSS, NO <style>, NO gradients, NO filters, NO <defs>, NO <g> groups
+- Round ALL numbers to integers (no decimals)
+- SHORT hex colors: #fff #000 #333 #39f #f93 #3c6 #c39
+- Max 15-20 elements total
+- Arial font only, sizes 12-16px
 
-CRITICAL: You MUST complete the entire SVG. Do not stop halfway.
-The response MUST end with </svg> tag.`;
+FORCE FINISH: If running out of space, SKIP legend/labels.
+PRIORITIZE </svg> above all else!`;
+
+  let svgPrompt = '';
   
   switch (visualType?.toUpperCase()) {
     case 'BAR_CHART':
-      svgPrompt = `Create an SVG bar chart for an IELTS Academic Writing Task 1.
+      svgPrompt = `Create MINIMAL bar chart SVG.
 
-CHART DATA:
-${visualDescription}
-${dataDescription}
+DATA: ${visualDescription} ${dataDescription}
 
-${baseStyle}
+${miniSvgRules}
 
-BAR CHART SPECIFIC:
-- Draw vertical bars with distinct fill colors
-- Include X axis (categories) with labels at bottom
-- Include Y axis (values) with numeric labels on left side
-- Draw grid lines for readability (light gray, stroke-dasharray="2,2")
-- Add a legend if comparing multiple data series
-- Use these colors: #3b82f6 (blue), #22c55e (green), #f59e0b (amber), #8b5cf6 (purple)
-- Bar width: 30-50px with 10-20px gaps
-- Ensure all labels are readable and don't overlap`;
+BARS: 4-6 vertical rects, distinct fills (#39f #f93 #3c6 #c39)
+AXES: 2 lines for x/y, short text labels
+TITLE: 1 text at top
+NO grid lines, NO legend - keep it simple!`;
       break;
       
     case 'LINE_GRAPH':
-      svgPrompt = `Create an SVG line graph for an IELTS Academic Writing Task 1.
+      svgPrompt = `Create MINIMAL line graph SVG.
 
-CHART DATA:
-${visualDescription}
-${dataDescription}
+DATA: ${visualDescription} ${dataDescription}
 
-${baseStyle}
+${miniSvgRules}
 
-LINE GRAPH SPECIFIC:
-- Draw trend lines using <polyline> or <path> elements
-- Mark data points with small circles (r="4")
-- Include X axis (time periods) at bottom
-- Include Y axis (values) on left with numeric labels
-- Draw light gray grid lines for readability
-- Add a legend showing what each line represents
-- Use these colors for lines: #3b82f6, #ef4444, #22c55e, #f59e0b
-- Line stroke-width: 2-3px
-- Connect data points smoothly`;
+LINES: 1-2 polylines or paths, stroke-width="2"
+POINTS: Small circles r="3" at key data points
+AXES: 2 lines, minimal labels
+TITLE: 1 text at top
+NO grid, NO legend!`;
       break;
       
     case 'PIE_CHART':
-      svgPrompt = `Create an SVG pie chart for an IELTS Academic Writing Task 1.
+      svgPrompt = `Create MINIMAL pie chart SVG.
 
-CHART DATA:
-${visualDescription}
-${dataDescription}
+DATA: ${visualDescription} ${dataDescription}
 
-${baseStyle}
+${miniSvgRules}
 
-PIE CHART SPECIFIC - IMPORTANT MATH:
-- Center the pie at cx="400" cy="280" with radius r="150"
-- Calculate arc paths correctly using SVG arc commands
-- For each segment, use: <path d="M cx,cy L startX,startY A r,r 0 largeArcFlag,1 endX,endY Z"/>
-- Arc formula: startAngle and endAngle in radians, x = cx + r*cos(angle), y = cy + r*sin(angle)
-- Use largeArcFlag=1 for segments > 180 degrees, 0 otherwise
-- Add percentage labels OUTSIDE the pie (offset by 20-30px from segment center)
-- Include a legend on the right side with color boxes and category names
-- Use distinct colors: #3b82f6, #ef4444, #22c55e, #f59e0b, #8b5cf6, #ec4899
-- Ensure segments total to 100% and cover full circle
-
-CRITICAL: Complete all pie segments and the closing </svg> tag.`;
+PIE: Center cx="400" cy="250" r="120"
+MAX 4-5 segments using path with arc commands
+LABELS: % inside or near segments
+TITLE: 1 text at top
+NO legend box - use labels only!`;
       break;
       
     case 'TABLE':
-      svgPrompt = `Create an SVG data table for an IELTS Academic Writing Task 1.
+      svgPrompt = `Create MINIMAL table SVG.
 
-TABLE DATA:
-${visualDescription}
-${dataDescription}
+DATA: ${visualDescription} ${dataDescription}
 
-${baseStyle}
+${miniSvgRules}
 
-TABLE SPECIFIC:
-- Position table starting at x="50" y="80"
-- Header row: gray background (#e2e8f0), bold text
-- Data rows: alternating colors (#ffffff and #f7fafc)
-- Cell borders: 1px solid #cbd5e1
-- Cell padding: ~10px (position text 10px from cell edges)
-- Column width: calculate based on content (minimum 80px)
-- Row height: 35-40px
-- Text centered in cells, font-size 12-14px
-- Title above table at y="50"`;
+TABLE: Rect borders, max 4 cols x 5 rows
+HEADER: Gray fill #ccc
+CELLS: Text centered, font-size="12"
+TITLE: 1 text at top
+Keep content SHORT!`;
       break;
       
     case 'PROCESS_DIAGRAM':
-      svgPrompt = `Create an SVG process diagram for an IELTS Academic Writing Task 1.
+      svgPrompt = `Create MINIMAL process diagram SVG.
 
-PROCESS DATA:
-${visualDescription}
-${dataDescription}
+DATA: ${visualDescription} ${dataDescription}
 
-${baseStyle}
+${miniSvgRules}
 
-PROCESS DIAGRAM SPECIFIC:
-- Show process steps in rounded rectangles (rx="8")
-- Connect steps with arrows using <path> or <line> + arrow markers
-- Steps can flow: left-to-right, top-to-bottom, or circular
-- Each step box: width ~120-150px, height ~60px
-- Light fill (#f0f9ff) with border (#3b82f6)
-- Number or label each step clearly inside the box
-- Arrow style: stroke="#666", stroke-width="2", arrow markers
-- Add descriptive labels on arrows if needed
-- Title at top center
-
-CRITICAL: Complete all steps, arrows, and close with </svg>.`;
+STEPS: 4-6 rects with rx="5"
+ARROWS: Simple lines with small triangles
+LABELS: Short text inside boxes
+TITLE: 1 text at top
+Vertical or horizontal flow!`;
       break;
       
     case 'MAP':
-      svgPrompt = `Create an SVG map comparison for an IELTS Academic Writing Task 1.
+      svgPrompt = `Create MINIMAL map comparison SVG.
 
-MAP DATA:
-${visualDescription}
-${dataDescription}
+DATA: ${visualDescription} ${dataDescription}
 
-${baseStyle}
+${miniSvgRules}
 
-MAP COMPARISON SPECIFIC:
-- Show TWO maps side by side (each ~350px wide)
-- Left map at x="25", right map at x="425"
-- Year/period labels above each map (e.g., "1990" and "2020")
-- Use simple shapes: rectangles for buildings, lines for roads
-- Buildings: fill="#e5e7eb" stroke="#9ca3af"
-- Roads: stroke="#6b7280" stroke-width="3"
-- Water/parks: fill="#93c5fd" or fill="#86efac"
-- Include compass (N arrow) in corner of each map
-- Label key features with small text (font-size 10-11px)
-- Use legend at bottom for color coding
-- Show changes clearly between the two time periods
-
-CRITICAL: Complete both maps and close with </svg>.`;
+TWO MAPS: Side by side, each ~350px wide
+SHAPES: Simple rects for buildings, lines for roads
+LABELS: Year above each map
+LEGEND: Just color boxes at bottom
+Keep features to minimum!`;
       break;
       
     case 'MIXED_CHARTS':
-      svgPrompt = `Create an SVG with two charts side by side for an IELTS Academic Writing Task 1.
+      svgPrompt = `Create MINIMAL dual chart SVG.
 
-CHART DATA:
-${visualDescription}
-${dataDescription}
+DATA: ${visualDescription} ${dataDescription}
 
-${baseStyle}
+${miniSvgRules}
 
-MIXED CHARTS SPECIFIC:
-- Divide viewBox: left chart (x: 50-380), right chart (x: 420-780)
-- Left chart: typically bar chart or line graph
-- Right chart: typically pie chart or different bar chart
-- Each chart has its own subtitle below the main title
-- Main title at top center (y="30")
-- Subtitles at y="60" for each chart
-- Consistent color scheme across both charts
-- Separate legends for each chart if needed
-- Ensure both charts are complete with all data
-
-CRITICAL: You MUST complete both charts fully. Do not stop halfway.
-End with </svg> tag.`;
+LEFT CHART (x:50-380): Simple bar or line
+RIGHT CHART (x:420-780): Simple pie or bar
+TITLE: 1 shared title at top
+MAX 10 elements per chart!`;
       break;
       
     default:
-      svgPrompt = `Create an SVG chart or diagram for an IELTS Academic Writing Task 1.
+      svgPrompt = `Create MINIMAL chart SVG.
 
-DATA:
-${visualDescription}
-${dataDescription}
+DATA: ${visualDescription} ${dataDescription}
 
-${baseStyle}
+${miniSvgRules}
 
-- Choose the most appropriate visualization style based on the data
-- Include all necessary labels, axes, and legends
-- Ensure professional appearance suitable for academic exams
-
-CRITICAL: Complete the entire SVG and end with </svg>.`;
+Choose simplest visualization for the data.
+Max 20 elements total!`;
   }
 
-  // Use higher token limit for Writing Task 1 SVGs
   return await generateSvgWithGemini(svgPrompt, geminiApiKey, maxTokens);
 }
 
