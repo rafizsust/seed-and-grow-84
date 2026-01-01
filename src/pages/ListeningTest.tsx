@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import {
-  WebAudioScheduledPlayer,
+  WebAudioScheduledPlayerSafe,
   ListeningQuestions,
   ListeningNavigation,
   ListeningTimer,
@@ -705,7 +705,7 @@ export default function ListeningTest() {
           {/* Center - Seamless Audio Player (official IELTS timing) - hidden on mobile */}
           {(test.audio_url || test.audio_url_part1 || test.audio_url_part2 || test.audio_url_part3 || test.audio_url_part4) && (
             <div className="hidden md:block flex-1 max-w-xl mx-4">
-              <WebAudioScheduledPlayer 
+              <WebAudioScheduledPlayerSafe 
                 audioUrls={{
                   part1: test.audio_url_part1 || test.audio_url,
                   part2: test.audio_url_part2,
@@ -715,7 +715,6 @@ export default function ListeningTest() {
                 initialStartTime={initialStartTime}
                 initialPart={initialPart}
                 onPartChange={(partNumber: number) => {
-                  // Jump to first question of the new part
                   const partRange = LISTENING_PART_RANGES[partNumber - 1];
                   if (partRange) {
                     setCurrentQuestion(partRange.start);
@@ -919,7 +918,7 @@ export default function ListeningTest() {
                   <p className="text-sm text-muted-foreground mb-4">Audio Player</p>
                   {(test.audio_url || test.audio_url_part1 || test.audio_url_part2 || test.audio_url_part3 || test.audio_url_part4) && (
                     <div className="w-full max-w-md">
-                      <WebAudioScheduledPlayer 
+                      <WebAudioScheduledPlayerSafe 
                         audioUrls={{
                           part1: test.audio_url_part1 || test.audio_url,
                           part2: test.audio_url_part2,

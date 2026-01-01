@@ -3,6 +3,7 @@ export * from './ListeningAudioPlayerSafe';
 export * from './MultiPartAudioPlayer';
 export * from './SeamlessAudioPlayer';
 export * from './WebAudioScheduledPlayer';
+export * from './WebAudioScheduledPlayerSafe';
 export * from './ListeningQuestions';
 export * from './ListeningNavigation';
 export * from './ListeningTestControls';

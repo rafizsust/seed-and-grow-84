@@ -6,53 +6,62 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Available Edge TTS voices with accents
-const EDGE_TTS_VOICES = {
-  US: [
-    "en-US-AriaNeural",
-    "en-US-JennyNeural",
-    "en-US-GuyNeural",
-    "en-US-DavisNeural",
-  ],
-  GB: [
-    "en-GB-SoniaNeural",
-    "en-GB-RyanNeural",
-    "en-GB-LibbyNeural",
-    "en-GB-ThomasNeural",
-  ],
-  AU: [
-    "en-AU-NatashaNeural",
-    "en-AU-WilliamNeural",
-  ],
-  IN: [
-    "en-IN-NeerjaNeural",
-    "en-IN-PrabhatNeural",
-  ],
+// Available TTS voices with accents for Listening tests
+const TTS_VOICES = {
+  US: ["Kore", "Charon", "Fenrir"],
+  GB: ["Kore", "Aoede", "Puck"],
+  AU: ["Kore", "Aoede", "Fenrir"],
+  IN: ["Kore", "Charon", "Puck"],
 };
 
-const ALL_ACCENTS = Object.keys(EDGE_TTS_VOICES) as Array<keyof typeof EDGE_TTS_VOICES>;
+const ALL_ACCENTS = Object.keys(TTS_VOICES) as Array<keyof typeof TTS_VOICES>;
 
-function getRandomVoice(preferredAccent?: string): { voiceId: string; accent: string } {
-  let accent: keyof typeof EDGE_TTS_VOICES;
+function getRandomVoice(preferredAccent?: string): { voiceName: string; accent: string } {
+  let accent: keyof typeof TTS_VOICES;
   
-  if (preferredAccent && preferredAccent !== "random" && preferredAccent !== "mixed" && EDGE_TTS_VOICES[preferredAccent as keyof typeof EDGE_TTS_VOICES]) {
-    accent = preferredAccent as keyof typeof EDGE_TTS_VOICES;
+  if (preferredAccent && preferredAccent !== "random" && preferredAccent !== "mixed" && TTS_VOICES[preferredAccent as keyof typeof TTS_VOICES]) {
+    accent = preferredAccent as keyof typeof TTS_VOICES;
   } else {
     accent = ALL_ACCENTS[Math.floor(Math.random() * ALL_ACCENTS.length)];
   }
   
-  const voices = EDGE_TTS_VOICES[accent];
-  const voiceId = voices[Math.floor(Math.random() * voices.length)];
-  return { voiceId, accent };
+  const voices = TTS_VOICES[accent];
+  const voiceName = voices[Math.floor(Math.random() * voices.length)];
+  return { voiceName, accent };
 }
 
-function getVoiceForMixedAccent(index: number, quantity: number): { voiceId: string; accent: string } {
-  // Distribute accents evenly across tests
+function getVoiceForMixedAccent(index: number): { voiceName: string; accent: string } {
   const accentIndex = index % ALL_ACCENTS.length;
   const accent = ALL_ACCENTS[accentIndex];
-  const voices = EDGE_TTS_VOICES[accent];
-  const voiceId = voices[Math.floor(Math.random() * voices.length)];
-  return { voiceId, accent };
+  const voices = TTS_VOICES[accent];
+  const voiceName = voices[Math.floor(Math.random() * voices.length)];
+  return { voiceName, accent };
+}
+
+// Retry helper with exponential backoff
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelayMs: number = 1000
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.log(`Attempt ${attempt + 1} failed:`, lastError.message);
+      
+      if (attempt < maxRetries - 1) {
+        const delay = baseDelayMs * Math.pow(2, attempt) + Math.random() * 500;
+        console.log(`Retrying in ${Math.round(delay)}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  throw lastError || new Error("All retries failed");
 }
 
 serve(async (req) => {
@@ -73,7 +82,6 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Verify admin status
     const token = authHeader.replace("Bearer ", "");
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     
@@ -84,7 +92,6 @@ serve(async (req) => {
       });
     }
 
-    // Check if user is admin
     const { data: adminCheck } = await supabase
       .from("admin_users")
       .select("id")
@@ -100,7 +107,6 @@ serve(async (req) => {
 
     const { module, topic, difficulty, quantity, accent } = await req.json();
 
-    // Validate inputs
     if (!module || !topic || !difficulty || !quantity) {
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
         status: 400,
@@ -129,7 +135,6 @@ serve(async (req) => {
       });
     }
 
-    // Create the job record
     const { data: job, error: jobError } = await supabase
       .from("bulk_generation_jobs")
       .insert({
@@ -151,7 +156,7 @@ serve(async (req) => {
       });
     }
 
-    // Start background processing (fire and forget)
+    // Start background processing
     processGenerationJob(supabase, job.id, module, topic, difficulty, quantity, accent).catch(console.error);
 
     return new Response(
@@ -182,7 +187,6 @@ async function processGenerationJob(
 ) {
   console.log(`[Job ${jobId}] Starting generation of ${quantity} ${module} tests`);
 
-  // Update job status to processing
   await supabase
     .from("bulk_generation_jobs")
     .update({ status: "processing", started_at: new Date().toISOString() })
@@ -196,46 +200,47 @@ async function processGenerationJob(
     try {
       console.log(`[Job ${jobId}] Processing test ${i + 1}/${quantity}`);
       
-      // Get voice based on accent preference
-      const { voiceId, accent } = accentPreference === "mixed" 
-        ? getVoiceForMixedAccent(i, quantity)
+      const { voiceName, accent } = accentPreference === "mixed" 
+        ? getVoiceForMixedAccent(i)
         : getRandomVoice(accentPreference);
       
-      // Generate content based on module
-      const content = await generateContent(module, topic, difficulty);
+      // Generate content with retry
+      const content = await withRetry(() => generateContent(module, topic, difficulty), 3, 2000);
       
       if (!content) {
-        throw new Error("Content generation failed");
+        throw new Error("Content generation failed - empty response");
       }
 
-      // For listening and speaking, generate audio
       let audioUrl: string | null = null;
       let sampleAudioUrl: string | null = null;
 
-      if (module === "listening" || module === "speaking") {
-        try {
-          audioUrl = await generateAndUploadAudio(
-            content.script || content.questions?.map((q: any) => q.text).join(" "),
-            voiceId,
-            jobId,
-            i
-          );
-
-          // For speaking, also generate sample answer audio
-          if (module === "speaking" && content.sampleAnswers) {
-            sampleAudioUrl = await generateAndUploadAudio(
-              content.sampleAnswers,
-              voiceId,
-              jobId,
-              i,
-              "_sample"
+      // LISTENING: Generate audio using Gemini TTS with retry
+      if (module === "listening") {
+        const scriptText = content.script || 
+          content.questions?.map((q: any) => q.text).join(". ") || 
+          "";
+        
+        if (scriptText.trim()) {
+          try {
+            audioUrl = await withRetry(
+              () => generateAndUploadGeminiAudio(scriptText, voiceName, jobId, i),
+              3,
+              3000
             );
+          } catch (audioError) {
+            console.error(`[Job ${jobId}] Listening audio failed for test ${i + 1}:`, audioError);
+            // For Listening: DISCARD if audio fails (per requirements)
+            throw new Error(`Audio generation failed: ${audioError instanceof Error ? audioError.message : "Unknown"}`);
           }
-        } catch (audioError) {
-          console.error(`[Job ${jobId}] Audio generation failed for test ${i + 1}:`, audioError);
-          // Audio failed - DISCARD this test per requirements
-          throw new Error(`Audio generation failed: ${audioError instanceof Error ? audioError.message : "Unknown"}`);
         }
+      }
+
+      // SPEAKING: NO audio generation - browser TTS only
+      // Speaking tests rely on browser TTS for examiner questions and user's own voice for responses
+      // We only save the content, no pre-generated audio
+      if (module === "speaking") {
+        console.log(`[Job ${jobId}] Speaking test - no audio generation (uses browser TTS)`);
+        // Just store the content - audio will be generated client-side via browser TTS
       }
 
       // Save to generated_test_audio table
@@ -244,13 +249,13 @@ async function processGenerationJob(
         module,
         topic,
         difficulty,
-        voice_id: voiceId,
+        voice_id: voiceName,
         accent,
         content_payload: content,
         audio_url: audioUrl,
         sample_audio_url: sampleAudioUrl,
         transcript: content.script || null,
-        status: audioUrl ? "ready" : "content_only",
+        status: module === "listening" && !audioUrl ? "failed" : "ready",
         is_published: false,
       };
 
@@ -265,7 +270,6 @@ async function processGenerationJob(
       successCount++;
       console.log(`[Job ${jobId}] Successfully created test ${i + 1}`);
 
-      // Update progress
       await supabase
         .from("bulk_generation_jobs")
         .update({ success_count: successCount, failure_count: failureCount })
@@ -277,7 +281,6 @@ async function processGenerationJob(
       errorLog.push({ index: i, error: errorMessage });
       console.error(`[Job ${jobId}] Failed test ${i + 1}:`, errorMessage);
 
-      // Update progress
       await supabase
         .from("bulk_generation_jobs")
         .update({ 
@@ -288,11 +291,10 @@ async function processGenerationJob(
         .eq("id", jobId);
     }
 
-    // Small delay between generations to avoid rate limiting
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Delay between generations to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 2000));
   }
 
-  // Mark job as completed
   await supabase
     .from("bulk_generation_jobs")
     .update({
@@ -332,23 +334,20 @@ Format as JSON:
 
     speaking: `Generate an IELTS ${difficulty} difficulty Speaking test about "${topic}".
 
-Include natural pauses in questions using "..." or [pause 1s].
-
 Format as JSON:
 {
   "part1": {
-    "questions": ["Question 1...", "Question 2..."],
-    "sampleAnswers": ["Sample answer 1", "Sample answer 2"]
+    "questions": ["Question 1", "Question 2", "Question 3", "Question 4"],
+    "sampleAnswers": ["Sample answer 1", "Sample answer 2", "Sample answer 3", "Sample answer 4"]
   },
   "part2": {
-    "cueCard": "Describe a [topic]...\nYou should say:\n- point 1\n- point 2\n- point 3",
-    "sampleAnswer": "A model answer..."
+    "cueCard": "Describe a [topic]...\\nYou should say:\\n- point 1\\n- point 2\\n- point 3\\nAnd explain why...",
+    "sampleAnswer": "A model answer (200-250 words)..."
   },
   "part3": {
-    "questions": ["Discussion question 1...", "Discussion question 2..."],
-    "sampleAnswers": ["Sample answer 1", "Sample answer 2"]
-  },
-  "sampleAnswers": "Combined sample answers for TTS"
+    "questions": ["Discussion question 1", "Discussion question 2", "Discussion question 3"],
+    "sampleAnswers": ["Sample answer 1", "Sample answer 2", "Sample answer 3"]
+  }
 }`,
 
     reading: `Generate an IELTS ${difficulty} difficulty Reading passage about "${topic}".
@@ -368,11 +367,6 @@ Format as JSON:
 }`,
 
     writing: `Generate an IELTS ${difficulty} difficulty Writing task about "${topic}".
-
-Include:
-1. Task 1: A data description task (chart/graph/diagram description)
-2. Task 2: An essay question
-3. Model answers for both
 
 Format as JSON:
 {
@@ -399,7 +393,7 @@ Format as JSON:
       messages: [
         {
           role: "system",
-          content: "You are an expert IELTS test creator. Generate high-quality, authentic exam content. Always respond with valid JSON only, no markdown.",
+          content: "You are an expert IELTS test creator. Generate high-quality, authentic exam content. Always respond with valid JSON only, no markdown code blocks.",
         },
         { role: "user", content: prompts[module] },
       ],
@@ -407,7 +401,8 @@ Format as JSON:
   });
 
   if (!response.ok) {
-    throw new Error(`AI generation failed: ${response.status}`);
+    const errorText = await response.text();
+    throw new Error(`AI generation failed: ${response.status} - ${errorText.slice(0, 200)}`);
   }
 
   const data = await response.json();
@@ -421,68 +416,125 @@ Format as JSON:
   let jsonContent = contentText;
   if (contentText.includes("```json")) {
     jsonContent = contentText.replace(/```json\n?/g, "").replace(/```\n?/g, "");
+  } else if (contentText.includes("```")) {
+    jsonContent = contentText.replace(/```\n?/g, "");
   }
 
-  return JSON.parse(jsonContent.trim());
+  try {
+    return JSON.parse(jsonContent.trim());
+  } catch (parseError) {
+    console.error("JSON parse error:", parseError, "Content:", jsonContent.slice(0, 500));
+    throw new Error("Failed to parse AI response as JSON");
+  }
 }
 
-async function generateAndUploadAudio(
+async function generateAndUploadGeminiAudio(
   text: string,
-  voiceId: string,
+  voiceName: string,
   jobId: string,
-  index: number,
-  suffix: string = ""
+  index: number
 ): Promise<string> {
-  // Use Edge TTS via a dedicated edge function or direct API
-  // For now, we'll use the Lovable AI TTS capability
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   
   // Clean text for TTS
   const cleanText = text
     .replace(/\[pause\s*\d*s?\]/gi, "...")
     .replace(/\n+/g, " ")
+    .slice(0, 5000) // Limit text length
     .trim();
 
-  // Generate audio using Gemini TTS or external TTS service
-  // For Microsoft Edge TTS, we need to use edge-tts library
-  // Since we can't use npm packages directly, we'll use a TTS API
-  
-  // Fallback: Use Lovable AI for now, with proper SSML-like pauses
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/audio/speech", {
+  if (!cleanText) {
+    throw new Error("Empty text for TTS");
+  }
+
+  // Call generate-gemini-tts function
+  const response = await fetch(`${supabaseUrl}/functions/v1/generate-gemini-tts`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${LOVABLE_API_KEY}`,
+      Authorization: `Bearer ${supabaseServiceKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "tts-1",
-      input: cleanText,
-      voice: voiceId.toLowerCase().includes("aria") ? "alloy" 
-           : voiceId.toLowerCase().includes("guy") ? "onyx"
-           : voiceId.toLowerCase().includes("jenny") ? "nova"
-           : voiceId.toLowerCase().includes("ryan") ? "echo"
-           : "alloy",
-      response_format: "mp3",
+      items: [{ key: `test_${index}`, text: cleanText }],
+      voiceName,
     }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`TTS generation failed: ${response.status} - ${errorText}`);
+    throw new Error(`Gemini TTS failed: ${response.status} - ${errorText.slice(0, 200)}`);
   }
 
-  const audioBuffer = await response.arrayBuffer();
-  const audioBytes = new Uint8Array(audioBuffer);
+  const data = await response.json();
+  
+  if (!data.success || !data.clips?.[0]?.audioBase64) {
+    throw new Error("No audio data in TTS response");
+  }
 
+  // Convert base64 PCM to WAV and upload to R2
+  const pcmBase64 = data.clips[0].audioBase64;
+  const sampleRate = data.clips[0].sampleRate || 24000;
+  
+  // Decode base64 to raw bytes
+  const pcmBytes = Uint8Array.from(atob(pcmBase64), c => c.charCodeAt(0));
+  
+  // Create WAV file from PCM data
+  const wavBytes = createWavFromPcm(pcmBytes, sampleRate);
+  
   // Upload to R2
   const { uploadToR2 } = await import("../_shared/r2Client.ts");
-  const key = `generated-tests/${jobId}/${index}${suffix}.mp3`;
+  const key = `generated-tests/${jobId}/${index}.wav`;
   
-  const uploadResult = await uploadToR2(key, audioBytes, "audio/mpeg");
+  const uploadResult = await uploadToR2(key, wavBytes, "audio/wav");
   
   if (!uploadResult.success || !uploadResult.url) {
     throw new Error(uploadResult.error || "R2 upload failed");
   }
 
   return uploadResult.url;
+}
+
+function createWavFromPcm(pcmData: Uint8Array, sampleRate: number): Uint8Array {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = pcmData.length;
+  const headerSize = 44;
+  const fileSize = headerSize + dataSize;
+
+  const buffer = new ArrayBuffer(fileSize);
+  const view = new DataView(buffer);
+
+  // RIFF header
+  writeString(view, 0, "RIFF");
+  view.setUint32(4, fileSize - 8, true);
+  writeString(view, 8, "WAVE");
+
+  // fmt chunk
+  writeString(view, 12, "fmt ");
+  view.setUint32(16, 16, true); // chunk size
+  view.setUint16(20, 1, true); // audio format (PCM)
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+
+  // data chunk
+  writeString(view, 36, "data");
+  view.setUint32(40, dataSize, true);
+
+  // Copy PCM data
+  const wavBytes = new Uint8Array(buffer);
+  wavBytes.set(pcmData, headerSize);
+
+  return wavBytes;
+}
+
+function writeString(view: DataView, offset: number, str: string): void {
+  for (let i = 0; i < str.length; i++) {
+    view.setUint8(offset + i, str.charCodeAt(i));
+  }
 }
