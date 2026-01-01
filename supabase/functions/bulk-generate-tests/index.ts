@@ -235,12 +235,28 @@ async function processGenerationJob(
         }
       }
 
-      // SPEAKING: NO audio generation - browser TTS only
-      // Speaking tests rely on browser TTS for examiner questions and user's own voice for responses
-      // We only save the content, no pre-generated audio
+      // SPEAKING: Generate audio for instructions and questions
+      // Uses Edge TTS (free) as primary, Gemini TTS as fallback
       if (module === "speaking") {
-        console.log(`[Job ${jobId}] Speaking test - no audio generation (uses browser TTS)`);
-        // Just store the content - audio will be generated client-side via browser TTS
+        console.log(`[Job ${jobId}] Speaking test - generating audio for instructions/questions`);
+        
+        try {
+          const speakingAudioUrls = await withRetry(
+            () => generateSpeakingAudio(content, voiceName, jobId, i),
+            2,
+            2000
+          );
+          
+          // Store audio URLs in content
+          if (speakingAudioUrls) {
+            content.audioUrls = speakingAudioUrls;
+          }
+        } catch (audioError) {
+          console.warn(`[Job ${jobId}] Speaking audio generation failed, will use browser TTS fallback:`, audioError);
+          // Speaking tests can still work with browser TTS fallback, don't fail the test
+          content.audioUrls = null;
+          content.useBrowserTTS = true;
+        }
       }
 
       // Save to generated_test_audio table
@@ -425,6 +441,155 @@ Format as JSON:
   } catch (parseError) {
     console.error("JSON parse error:", parseError, "Content:", jsonContent.slice(0, 500));
     throw new Error("Failed to parse AI response as JSON");
+  }
+}
+
+// Generate speaking audio for instructions and questions
+// Uses Edge TTS (free) as primary, Gemini TTS as fallback
+async function generateSpeakingAudio(
+  content: any,
+  voiceName: string,
+  jobId: string,
+  index: number
+): Promise<Record<string, string> | null> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  
+  const audioUrls: Record<string, string> = {};
+  const ttsItems: Array<{ key: string; text: string }> = [];
+  
+  // Collect all texts that need TTS
+  // Part 1 instruction + questions
+  if (content.part1) {
+    if (content.part1.instruction) {
+      ttsItems.push({ key: "part1_instruction", text: content.part1.instruction });
+    }
+    content.part1.questions?.forEach((q: string, idx: number) => {
+      ttsItems.push({ key: `part1_q${idx + 1}`, text: q });
+    });
+  }
+  
+  // Part 2 instruction + cue card
+  if (content.part2) {
+    const part2Instruction = "Now, I'm going to give you a topic and I'd like you to talk about it for one to two minutes. Before you talk, you'll have one minute to think about what you're going to say. You can make some notes if you wish.";
+    ttsItems.push({ key: "part2_instruction", text: part2Instruction });
+    
+    if (content.part2.cueCard) {
+      const cueCardLines = content.part2.cueCard.split('\n');
+      const topic = cueCardLines[0]?.replace(/^Describe\s+/i, '') || content.part2.cueCard;
+      ttsItems.push({ key: "part2_cuecard_topic", text: `Your topic is: ${topic}` });
+    }
+    
+    ttsItems.push({ 
+      key: "part2_start_speaking", 
+      text: "Your one minute preparation time is over. Please start speaking now. You have two minutes." 
+    });
+  }
+  
+  // Part 3 instruction + questions
+  if (content.part3) {
+    const part3Instruction = "We've been talking about the topic from Part 2. Now I'd like to discuss with you some more general questions related to this.";
+    ttsItems.push({ key: "part3_instruction", text: part3Instruction });
+    
+    content.part3.questions?.forEach((q: string, idx: number) => {
+      ttsItems.push({ key: `part3_q${idx + 1}`, text: q });
+    });
+  }
+  
+  // Ending message
+  ttsItems.push({ 
+    key: "test_ending", 
+    text: "Thank you. That is the end of the speaking test." 
+  });
+  
+  if (ttsItems.length === 0) {
+    return null;
+  }
+  
+  console.log(`[Job ${jobId}] Generating audio for ${ttsItems.length} speaking items`);
+  
+  // Try Edge TTS first (free)
+  try {
+    const edgeResponse = await fetch(`${supabaseUrl}/functions/v1/generate-edge-tts`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${supabaseServiceKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        items: ttsItems,
+        accent: "GB",
+      }),
+    });
+    
+    if (edgeResponse.ok) {
+      const edgeData = await edgeResponse.json();
+      
+      if (edgeData.success && edgeData.clips?.length > 0) {
+        const { uploadToR2 } = await import("../_shared/r2Client.ts");
+        
+        for (const clip of edgeData.clips) {
+          const audioBytes = Uint8Array.from(atob(clip.audioBase64), c => c.charCodeAt(0));
+          const key = `speaking-tests/${jobId}/${index}/${clip.key}.mp3`;
+          
+          const uploadResult = await uploadToR2(key, audioBytes, "audio/mpeg");
+          if (uploadResult.success && uploadResult.url) {
+            audioUrls[clip.key] = uploadResult.url;
+          }
+        }
+        
+        console.log(`[Job ${jobId}] Edge TTS generated ${Object.keys(audioUrls).length} audio files`);
+        return Object.keys(audioUrls).length > 0 ? audioUrls : null;
+      }
+    }
+    
+    console.warn(`[Job ${jobId}] Edge TTS failed, trying Gemini TTS fallback`);
+  } catch (edgeErr) {
+    console.warn(`[Job ${jobId}] Edge TTS error:`, edgeErr);
+  }
+  
+  // Fallback to Gemini TTS
+  try {
+    const geminiResponse = await fetch(`${supabaseUrl}/functions/v1/generate-gemini-tts`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${supabaseServiceKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        items: ttsItems,
+        voiceName,
+      }),
+    });
+    
+    if (!geminiResponse.ok) {
+      throw new Error(`Gemini TTS failed: ${geminiResponse.status}`);
+    }
+    
+    const geminiData = await geminiResponse.json();
+    
+    if (!geminiData.success || !geminiData.clips?.length) {
+      throw new Error("No audio from Gemini TTS");
+    }
+    
+    const { uploadToR2 } = await import("../_shared/r2Client.ts");
+    
+    for (const clip of geminiData.clips) {
+      const pcmBytes = Uint8Array.from(atob(clip.audioBase64), c => c.charCodeAt(0));
+      const wavBytes = createWavFromPcm(pcmBytes, clip.sampleRate || 24000);
+      const key = `speaking-tests/${jobId}/${index}/${clip.key}.wav`;
+      
+      const uploadResult = await uploadToR2(key, wavBytes, "audio/wav");
+      if (uploadResult.success && uploadResult.url) {
+        audioUrls[clip.key] = uploadResult.url;
+      }
+    }
+    
+    console.log(`[Job ${jobId}] Gemini TTS fallback generated ${Object.keys(audioUrls).length} audio files`);
+    return Object.keys(audioUrls).length > 0 ? audioUrls : null;
+  } catch (geminiErr) {
+    console.error(`[Job ${jobId}] Gemini TTS fallback also failed:`, geminiErr);
+    throw geminiErr;
   }
 }
 

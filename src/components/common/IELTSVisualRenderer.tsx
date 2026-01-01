@@ -1,4 +1,59 @@
 import { cn } from '@/lib/utils';
+import { Component, ErrorInfo, ReactNode } from 'react';
+
+// Error Boundary for crash-proof charts
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error?: Error;
+}
+
+class ChartErrorBoundary extends Component<{ children: ReactNode; fallbackData?: ChartDataItem[] }, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('Chart render error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      // Simplified bar chart fallback
+      const data = this.props.fallbackData || [];
+      if (data.length === 0) {
+        return (
+          <div className="p-4 bg-destructive/10 text-destructive rounded-lg text-center">
+            <p className="text-sm">Chart failed to render</p>
+          </div>
+        );
+      }
+      
+      const maxVal = Math.max(...data.map(d => d.value), 1);
+      return (
+        <div className="p-4 bg-muted/30 rounded-lg">
+          <p className="text-xs text-muted-foreground mb-3">Simplified View</p>
+          <div className="space-y-2">
+            {data.slice(0, 8).map((item, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="text-xs w-20 truncate">{item.label}</span>
+                <div className="flex-1 h-4 bg-muted rounded overflow-hidden">
+                  <div 
+                    className="h-full bg-primary/70 rounded"
+                    style={{ width: `${(item.value / maxVal) * 100}%` }}
+                  />
+                </div>
+                <span className="text-xs w-12 text-right">{item.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // Chart data types for different visual types
 export interface ChartDataItem {
@@ -81,6 +136,24 @@ interface IELTSVisualRendererProps {
  * Handles: Bar Charts, Line Graphs, Pie Charts, Tables, Process Diagrams, Maps, Mixed Charts
  */
 export function IELTSVisualRenderer({
+  chartData,
+  fallbackDescription = 'Visual data not available',
+  className = '',
+}: IELTSVisualRendererProps) {
+  const fallbackData = chartData?.data || [];
+  
+  return (
+    <ChartErrorBoundary fallbackData={fallbackData}>
+      <IELTSVisualRendererInner
+        chartData={chartData}
+        fallbackDescription={fallbackDescription}
+        className={className}
+      />
+    </ChartErrorBoundary>
+  );
+}
+
+function IELTSVisualRendererInner({
   chartData,
   fallbackDescription = 'Visual data not available',
   className = '',

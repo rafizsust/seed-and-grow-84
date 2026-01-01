@@ -74,3 +74,6 @@ verify_jwt = false
 
 [functions.publish-generated-tests]
 verify_jwt = true
+
+[functions.generate-edge-tts]
+verify_jwt = false
