@@ -1,8 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
-import { PutObjectCommand } from "https://esm.sh/@aws-sdk/client-s3@3.529.1";
-import { getR2Client, getR2Config } from "../_shared/r2Client.ts";
+import { uploadToR2 } from "../_shared/r2Client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -186,8 +185,6 @@ serve(async (req) => {
     const supabaseService = createClient(supabaseUrl, supabaseServiceKey);
 
     // Upload each segment to R2 and produce public URLs
-    const r2Client = getR2Client();
-    const { bucketName, publicUrl } = getR2Config();
     const audioUrls: Record<string, string> = {};
     
     for (const key of audioKeys) {
@@ -200,16 +197,13 @@ serve(async (req) => {
         const audioBytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
         const r2Key = `speaking-audios/ai-speaking/${user.id}/${testId}/${key}.webm`;
 
-        const command = new PutObjectCommand({
-          Bucket: bucketName,
-          Key: r2Key,
-          Body: audioBytes,
-          ContentType: 'audio/webm',
-        });
-
-        await r2Client.send(command);
-        audioUrls[key] = `${publicUrl?.replace(/\/$/, '')}/${r2Key}`;
-        console.log(`[evaluate-ai-speaking] Uploaded audio to R2: ${r2Key}`);
+        const result = await uploadToR2(r2Key, audioBytes, 'audio/webm');
+        if (result.success && result.url) {
+          audioUrls[key] = result.url;
+          console.log(`[evaluate-ai-speaking] Uploaded audio to R2: ${r2Key}`);
+        } else {
+          console.warn(`[evaluate-ai-speaking] Upload failed for ${key}:`, result.error);
+        }
       } catch (err) {
         console.error(`Failed to upload audio for ${key}:`, err);
       }

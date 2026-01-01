@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { PutObjectCommand } from "https://esm.sh/@aws-sdk/client-s3@3.529.1";
-import { getR2Client, getR2Config } from "../_shared/r2Client.ts";
+import { uploadToR2, getR2Config } from "../_shared/r2Client.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,10 +24,8 @@ serve(async (req) => {
       );
     }
 
-    const r2Client = getR2Client();
-    const { bucketName, publicUrl } = getR2Config();
-
-    if (!bucketName || !publicUrl) {
+    const config = getR2Config();
+    if (!config.bucketName || !config.publicUrl) {
       throw new Error("R2_BUCKET_NAME or R2_PUBLIC_URL not configured");
     }
 
@@ -44,24 +41,18 @@ serve(async (req) => {
     const uint8Array = new Uint8Array(arrayBuffer);
 
     // Upload to R2
-    const command = new PutObjectCommand({
-      Bucket: bucketName,
-      Key: key,
-      Body: uint8Array,
-      ContentType: file.type || "application/octet-stream",
-    });
+    const result = await uploadToR2(key, uint8Array, file.type || "application/octet-stream");
 
-    await r2Client.send(command);
-
-    // Construct public URL
-    const fileUrl = `${publicUrl.replace(/\/$/, "")}/${key}`;
+    if (!result.success) {
+      throw new Error(result.error || "Upload failed");
+    }
 
     console.log(`Successfully uploaded: ${key}`);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        url: fileUrl,
+        url: result.url,
         key,
         fileName,
         contentType: file.type,
