@@ -1,5 +1,6 @@
 // Types for AI Practice feature
 import { supabase } from '@/integrations/supabase/client';
+import { uploadToR2 } from '@/lib/r2Upload';
 import type { Json } from '@/integrations/supabase/types';
 
 export type PracticeModule = 'reading' | 'listening' | 'writing' | 'speaking';
@@ -373,22 +374,22 @@ export async function saveGeneratedTestAsync(test: GeneratedTest, userId: string
     try {
       const pcmBytes = Uint8Array.from(atob(test.audioBase64), (c) => c.charCodeAt(0));
       const wavBlob = pcmToWav(pcmBytes, test.sampleRate || 24000);
-      const path = `ai-practice/${userId}/${test.id}.wav`;
+      const fileName = `${test.id}.wav`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('listening-audios')
-        .upload(path, wavBlob, { contentType: 'audio/wav', upsert: true });
+      const result = await uploadToR2({
+        file: new File([wavBlob], fileName, { type: 'audio/wav' }),
+        folder: `listening-audios/ai-practice/${userId}`,
+        fileName,
+      });
 
-      if (uploadError) {
-        console.error('Failed to upload AI practice listening audio:', uploadError);
+      if (!result.success || !result.url) {
+        console.error('Failed to upload AI practice listening audio:', result.error);
         return;
       }
 
-      const publicUrl = supabase.storage.from('listening-audios').getPublicUrl(path).data.publicUrl;
-
       const { error: updateError } = await supabase
         .from('ai_practice_tests')
-        .update({ audio_url: publicUrl })
+        .update({ audio_url: result.url })
         .eq('id', test.id)
         .eq('user_id', userId);
 
@@ -398,7 +399,7 @@ export async function saveGeneratedTestAsync(test: GeneratedTest, userId: string
       }
 
       // Update cache so immediate navigation also has audioUrl
-      currentTestCache = { ...(currentTestCache ?? test), audioUrl: publicUrl };
+      currentTestCache = { ...(currentTestCache ?? test), audioUrl: result.url };
     } catch (err) {
       console.error('Failed to convert/upload AI practice audio:', err);
     }

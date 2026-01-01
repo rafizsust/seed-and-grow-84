@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { UploadCloud, Loader2, Music } from 'lucide-react';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
+import { uploadToR2 } from '@/lib/r2Upload';
 
 interface ListeningAudioUploaderProps {
   testId: string;
@@ -48,44 +48,17 @@ export function ListeningAudioUploader({
     setProgress(0);
 
     try {
-      // If there's an existing audio, remove it first
-      if (currentAudioUrl) {
-        const existingFilePath = currentAudioUrl.split('/').pop();
-        if (existingFilePath) {
-          const { error: removeError } = await supabase.storage
-            .from('listening-audios')
-            .remove([existingFilePath]);
-          if (removeError) {
-            console.warn('Failed to remove old audio file:', removeError.message);
-            // Don't block upload, just warn
-          }
-        }
+      const result = await uploadToR2({
+        file,
+        folder: `listening-audios/${testId}`,
+        onProgress: setProgress,
+      });
+
+      if (!result.success || !result.url) {
+        throw new Error(result.error || 'Upload failed');
       }
 
-      const filePath = `${testId}/${file.name}`;
-      const { error } = await supabase.storage
-        .from('listening-audios')
-        .upload(filePath, file, 
-          {
-            cacheControl: '3600',
-            upsert: true,
-            onUploadProgress: (event: { loaded: number; total?: number }) => {
-              if (event.total) {
-                setProgress(Math.round((event.loaded / event.total) * 100));
-              }
-            },
-          } as any // Cast to any to allow onUploadProgress
-        );
-
-      if (error) throw error;
-
-      const { data: publicUrlData } = supabase.storage
-        .from('listening-audios')
-        .getPublicUrl(filePath);
-
-      if (!publicUrlData.publicUrl) throw new Error('Failed to get public URL.');
-
-      onUploadSuccess(publicUrlData.publicUrl);
+      onUploadSuccess(result.url);
       toast.success('Audio uploaded successfully!');
       setFile(null);
       if (fileInputRef.current) {
@@ -100,27 +73,11 @@ export function ListeningAudioUploader({
     }
   };
 
-  const handleRemoveAudio = async () => {
+  const handleRemoveAudio = () => {
     if (!currentAudioUrl) return;
-
     if (!confirm('Are you sure you want to remove this audio file?')) return;
-
-    try {
-      const filePath = currentAudioUrl.split('/').pop();
-      if (!filePath) throw new Error('Invalid audio URL.');
-
-      const { error } = await supabase.storage
-        .from('listening-audios')
-        .remove([`${testId}/${filePath}`]); // Ensure correct path for removal
-
-      if (error) throw error;
-
-      onRemoveSuccess();
-      toast.success('Audio file removed successfully!');
-    } catch (error: any) {
-      console.error('Error removing audio:', error);
-      toast.error(`Removal failed: ${error.message}`);
-    }
+    onRemoveSuccess();
+    toast.success('Audio file removed successfully!');
   };
 
   return (

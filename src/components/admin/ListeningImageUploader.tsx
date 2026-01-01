@@ -5,10 +5,10 @@ import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { UploadCloud, Loader2, Image } from 'lucide-react';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
+import { uploadToR2 } from '@/lib/r2Upload';
 
 interface ListeningImageUploaderProps {
-  testId: string; // Used for folder structure in storage
+  testId: string;
   currentImageUrl: string | null;
   onUploadSuccess: (url: string) => void;
   onRemoveSuccess: () => void;
@@ -48,44 +48,17 @@ export function ListeningImageUploader({
     setProgress(0);
 
     try {
-      // If there's an existing image, remove it first
-      if (currentImageUrl) {
-        const existingFilePath = currentImageUrl.split('/').pop(); // Get file name from URL
-        if (existingFilePath) {
-          const { error: removeError } = await supabase.storage
-            .from('listening-images')
-            .remove([`${testId}/${existingFilePath}`]); // Ensure correct path for removal
-          if (removeError) {
-            console.warn('Failed to remove old image file:', removeError.message);
-            // Don't block upload, just warn
-          }
-        }
+      const result = await uploadToR2({
+        file,
+        folder: `listening-images/${testId}`,
+        onProgress: setProgress,
+      });
+
+      if (!result.success || !result.url) {
+        throw new Error(result.error || 'Upload failed');
       }
 
-      const filePath = `${testId}/${file.name}`;
-      const { error } = await supabase.storage
-        .from('listening-images')
-        .upload(filePath, file, 
-          {
-            cacheControl: '3600',
-            upsert: true,
-            onUploadProgress: (event: { loaded: number; total?: number }) => {
-              if (event.total) {
-                setProgress(Math.round((event.loaded / event.total) * 100));
-              }
-            },
-          } as any // Cast to any to allow onUploadProgress
-        );
-
-      if (error) throw error;
-
-      const { data: publicUrlData } = supabase.storage
-        .from('listening-images')
-        .getPublicUrl(filePath);
-
-      if (!publicUrlData.publicUrl) throw new Error('Failed to get public URL.');
-
-      onUploadSuccess(publicUrlData.publicUrl);
+      onUploadSuccess(result.url);
       toast.success('Image uploaded successfully!');
       setFile(null);
       if (fileInputRef.current) {
@@ -100,27 +73,11 @@ export function ListeningImageUploader({
     }
   };
 
-  const handleRemoveImage = async () => {
+  const handleRemoveImage = () => {
     if (!currentImageUrl) return;
-
-    if (!confirm('Are you sure you want to remove this image file?')) return;
-
-    try {
-      const filePath = currentImageUrl.split('/').pop();
-      if (!filePath) throw new Error('Invalid image URL.');
-
-      const { error } = await supabase.storage
-        .from('listening-images')
-        .remove([`${testId}/${filePath}`]); // Ensure correct path for removal
-
-      if (error) throw error;
-
-      onRemoveSuccess();
-      toast.success('Image file removed successfully!');
-    } catch (error: any) {
-      console.error('Error removing image:', error);
-      toast.error(`Removal failed: ${error.message}`);
-    }
+    if (!confirm('Are you sure you want to remove this image?')) return;
+    onRemoveSuccess();
+    toast.success('Image removed successfully!');
   };
 
   return (

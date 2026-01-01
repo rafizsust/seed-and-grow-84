@@ -5,10 +5,10 @@ import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { UploadCloud, Loader2, Image } from 'lucide-react';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
+import { uploadToR2 } from '@/lib/r2Upload';
 
 interface WritingImageUploaderProps {
-  taskId: string; // Used for folder structure in storage
+  taskId: string;
   currentImageUrl: string | null;
   currentImageWidth: number | null;
   currentImageHeight: number | null;
@@ -52,42 +52,15 @@ export function WritingImageUploader({
     setProgress(0);
 
     try {
-      // If there's an existing image, remove it first
-      if (currentImageUrl) {
-        const existingFilePath = currentImageUrl.split('/').pop(); // Get file name from URL
-        if (existingFilePath) {
-          const { error: removeError } = await supabase.storage
-            .from('writing-images')
-            .remove([`${taskId}/${existingFilePath}`]); // Ensure correct path for removal
-          if (removeError) {
-            console.warn('Failed to remove old image file:', removeError.message);
-            // Don't block upload, just warn
-          }
-        }
+      const result = await uploadToR2({
+        file,
+        folder: `writing-images/${taskId}`,
+        onProgress: setProgress,
+      });
+
+      if (!result.success || !result.url) {
+        throw new Error(result.error || 'Upload failed');
       }
-
-      const filePath = `${taskId}/${file.name}`;
-      const { error } = await supabase.storage
-        .from('writing-images')
-        .upload(filePath, file, 
-          {
-            cacheControl: '3600',
-            upsert: true,
-            onUploadProgress: (event: { loaded: number; total?: number }) => {
-              if (event.total) {
-                setProgress(Math.round((event.loaded / event.total) * 100));
-              }
-            },
-          } as any // Cast to any to allow onUploadProgress
-        );
-
-      if (error) throw error;
-
-      const { data: publicUrlData } = supabase.storage
-        .from('writing-images')
-        .getPublicUrl(filePath);
-
-      if (!publicUrlData.publicUrl) throw new Error('Failed to get public URL.');
 
       // Get image dimensions
       const img = new window.Image();
@@ -96,7 +69,7 @@ export function WritingImageUploader({
         img.onload = resolve;
       });
 
-      onUploadSuccess(publicUrlData.publicUrl, img.width, img.height);
+      onUploadSuccess(result.url, img.width, img.height);
       toast.success('Image uploaded successfully!');
       setFile(null);
       if (fileInputRef.current) {
@@ -111,27 +84,12 @@ export function WritingImageUploader({
     }
   };
 
-  const handleRemoveImage = async () => {
+  const handleRemoveImage = () => {
     if (!currentImageUrl) return;
-
-    if (!confirm('Are you sure you want to remove this image file?')) return;
-
-    try {
-      const filePath = currentImageUrl.split('/').pop();
-      if (!filePath) throw new Error('Invalid image URL.');
-
-      const { error } = await supabase.storage
-        .from('writing-images')
-        .remove([`${taskId}/${filePath}`]); // Ensure correct path for removal
-
-      if (error) throw error;
-
-      onRemoveSuccess();
-      toast.success('Image file removed successfully!');
-    } catch (error: any) {
-      console.error('Error removing image:', error);
-      toast.error(`Removal failed: ${error.message}`);
-    }
+    if (!confirm('Are you sure you want to remove this image?')) return;
+    // R2 doesn't require deletion for overwrite - just clear the reference
+    onRemoveSuccess();
+    toast.success('Image removed successfully!');
   };
 
   return (
