@@ -4,12 +4,13 @@ import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
+
 import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { AILoadingScreen } from '@/components/common/AILoadingScreen';
+import { SelectableCard } from '@/components/common/SelectableCard';
 import { useToast } from '@/hooks/use-toast';
 import { ToastAction } from '@/components/ui/toast';
 import { describeApiError } from '@/lib/apiErrors';
@@ -387,13 +388,12 @@ export default function AIPracticeSpeakingConfig() {
                       id={part.value}
                       className="peer sr-only"
                     />
-                    <Label
-                      htmlFor={part.value}
-                      className="flex flex-col gap-2 p-4 rounded-lg border-2 cursor-pointer transition-all
-                        peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5
-                        hover:bg-muted/50"
+                    <SelectableCard
+                      isSelected={partType === part.value}
+                      onClick={() => setPartType(part.value)}
+                      autoScrollOnSelect
                     >
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between pr-6">
                         <span className="font-semibold">{part.label}</span>
                         <Badge variant="outline" className="text-xs">
                           <Clock className="w-3 h-3 mr-1" />
@@ -401,7 +401,7 @@ export default function AIPracticeSpeakingConfig() {
                         </Badge>
                       </div>
                       <span className="text-sm text-muted-foreground">{part.description}</span>
-                    </Label>
+                    </SelectableCard>
                   </div>
                 ))}
               </RadioGroup>
@@ -430,15 +430,15 @@ export default function AIPracticeSpeakingConfig() {
                       id={`diff-${option.value}`}
                       className="peer sr-only"
                     />
-                    <Label
-                      htmlFor={`diff-${option.value}`}
-                      className={`flex flex-col items-center gap-1 p-3 rounded-lg border-2 cursor-pointer transition-all
-                        peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5
-                        hover:bg-muted/50`}
+                    <SelectableCard
+                      isSelected={difficulty === option.value}
+                      onClick={() => setDifficulty(option.value)}
+                      autoScrollOnSelect
+                      className="flex flex-col items-center gap-1"
                     >
                       <Badge className={option.color}>{option.label}</Badge>
                       <span className="text-xs text-muted-foreground text-center mt-1">{option.description}</span>
-                    </Label>
+                    </SelectableCard>
                   </div>
                 ))}
               </RadioGroup>

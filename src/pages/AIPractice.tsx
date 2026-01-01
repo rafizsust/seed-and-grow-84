@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AILoadingScreen } from '@/components/common/AILoadingScreen';
 import { GeminiQuotaDisplay } from '@/components/common/GeminiQuotaDisplay';
 import { CreditDisplay } from '@/components/common/CreditDisplay';
+import { SelectableCard } from '@/components/common/SelectableCard';
 import { useToast } from '@/hooks/use-toast';
 import { describeApiError } from '@/lib/apiErrors';
 import { useAuth } from '@/hooks/useAuth';
@@ -790,18 +791,15 @@ export default function AIPractice() {
                     <Label className="text-base font-medium">Question Type</Label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {READING_QUESTION_TYPES.map((type) => (
-                        <button
+                        <SelectableCard
                           key={type.value}
+                          isSelected={readingQuestionType === type.value}
                           onClick={() => setReadingQuestionType(type.value)}
-                          className={`p-4 rounded-lg border-2 text-left transition-all ${
-                            readingQuestionType === type.value
-                              ? 'border-primary bg-primary/5'
-                              : 'border-border hover:border-primary/50'
-                          }`}
+                          autoScrollOnSelect
                         >
-                          <div className="font-medium">{type.label}</div>
+                          <div className="font-medium pr-6">{type.label}</div>
                           <div className="text-sm text-muted-foreground">{type.description}</div>
-                        </button>
+                        </SelectableCard>
                       ))}
                     </div>
                   </div>
@@ -874,18 +872,15 @@ export default function AIPractice() {
                     <Label className="text-base font-medium">Question Type</Label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {LISTENING_QUESTION_TYPES.map((type) => (
-                        <button
+                        <SelectableCard
                           key={type.value}
+                          isSelected={listeningQuestionType === type.value}
                           onClick={() => setListeningQuestionType(type.value)}
-                          className={`p-4 rounded-lg border-2 text-left transition-all ${
-                            listeningQuestionType === type.value
-                              ? 'border-primary bg-primary/5'
-                              : 'border-border hover:border-primary/50'
-                          }`}
+                          autoScrollOnSelect
                         >
-                          <div className="font-medium">{type.label}</div>
+                          <div className="font-medium pr-6">{type.label}</div>
                           <div className="text-sm text-muted-foreground">{type.description}</div>
-                        </button>
+                        </SelectableCard>
                       ))}
                     </div>
                   </div>
@@ -1217,21 +1212,18 @@ export default function AIPractice() {
                     <Label className="text-base font-medium">Task Type</Label>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       {WRITING_TASK_TYPES.map((type) => (
-                        <button
+                        <SelectableCard
                           key={type.value}
+                          isSelected={writingTaskType === type.value}
                           onClick={() => setWritingTaskType(type.value)}
-                          className={`p-4 rounded-lg border-2 text-left transition-all ${
-                            writingTaskType === type.value
-                              ? 'border-primary bg-primary/5'
-                              : 'border-border hover:border-primary/50'
-                          }`}
+                          autoScrollOnSelect
                         >
-                          <div className="font-medium">{type.label}</div>
+                          <div className="font-medium pr-6">{type.label}</div>
                           <div className="text-sm text-muted-foreground">{type.description}</div>
                           <Badge variant="secondary" className="mt-2">
                             {type.value === 'FULL_TEST' ? '400+ words' : type.value === 'TASK_1' ? '150+ words' : '250+ words'}
                           </Badge>
-                        </button>
+                        </SelectableCard>
                       ))}
                     </div>
                   </div>
@@ -1334,18 +1326,15 @@ export default function AIPractice() {
                     <Label className="text-base font-medium">Test Parts</Label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {SPEAKING_PART_TYPES.map((type) => (
-                        <button
+                        <SelectableCard
                           key={type.value}
+                          isSelected={speakingPartType === type.value}
                           onClick={() => setSpeakingPartType(type.value)}
-                          className={`p-4 rounded-lg border-2 text-left transition-all ${
-                            speakingPartType === type.value
-                              ? 'border-primary bg-primary/5'
-                              : 'border-border hover:border-primary/50'
-                          }`}
+                          autoScrollOnSelect
                         >
-                          <div className="font-medium">{type.label}</div>
+                          <div className="font-medium pr-6">{type.label}</div>
                           <div className="text-sm text-muted-foreground">{type.description}</div>
-                        </button>
+                        </SelectableCard>
                       ))}
                     </div>
                   </div>
