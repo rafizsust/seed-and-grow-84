@@ -72,7 +72,7 @@ const App = () => (
         <Toaster />
         <Sonner position="top-center" />
         <BrowserRouter>
-          <div className="overflow-x-hidden">
+          <div className="overflow-x-hidden min-h-screen">
           
           <Routes>
             <Route path="/" element={<Index />} />

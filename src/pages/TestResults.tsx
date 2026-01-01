@@ -17,13 +17,15 @@ import {
   Loader2,
   Flag,
   Volume2,
-  Info
+  Info,
+  Layers
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import { describeApiError } from '@/lib/apiErrors';
 import { TranscriptViewer } from '@/components/listening/TranscriptViewer';
 import { AddToFlashcardButton } from '@/components/common/AddToFlashcardButton';
+import { ProgressOverlayFlashcard } from '@/components/common/ProgressOverlayFlashcard';
 
 interface QuestionResult {
   questionNumber: number;
@@ -101,6 +103,7 @@ export default function TestResults() {
   }>({});
   const [questionPassageMap, setQuestionPassageMap] = useState<Record<number, number>>({});
   const [showOnlyIncorrect, setShowOnlyIncorrect] = useState(false);
+  const [showFlashcardReview, setShowFlashcardReview] = useState(false);
   const autoLoadedRef = useRef(false);
 
   useEffect(() => {
@@ -577,10 +580,39 @@ Thank you for looking into this.
                   <XCircle size={16} />
                   {showOnlyIncorrect ? 'Show All' : 'Show Incorrect Only'}
                 </Button>
+                {resultData.questionResults.filter(r => !r.isCorrect).length > 0 && (
+                  <Button
+                    variant={showFlashcardReview ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setShowFlashcardReview(!showFlashcardReview)}
+                    className="gap-2"
+                  >
+                    <Layers size={16} />
+                    {showFlashcardReview ? 'Hide Flashcard Review' : 'Flashcard Review'}
+                  </Button>
+                )}
               </div>
             </div>
           </CardContent>
         </Card>
+
+        {/* Flashcard Review Mode */}
+        {showFlashcardReview && resultData.questionResults.filter(r => !r.isCorrect).length > 0 && (
+          <Card className="mb-6 border-accent/30 bg-gradient-to-br from-accent/5 to-primary/5">
+            <CardContent className="py-6">
+              <ProgressOverlayFlashcard
+                items={resultData.questionResults
+                  .filter(r => !r.isCorrect)
+                  .map(r => ({
+                    key: `Q${r.questionNumber}: ${r.questionText}`,
+                    value: r.correctAnswer,
+                    isCorrect: false
+                  }))}
+                title="Review Incorrect Answers"
+              />
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
           {/* Left Side - Question Review */}

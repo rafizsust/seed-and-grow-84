@@ -99,8 +99,8 @@ export function ProgressOverlayFlashcard({
       >
         <div className="p-6 flex flex-col items-center justify-center min-h-[180px]">
           {!revealed ? (
-            // Front - Show KEY
-            <div className="text-center">
+            // Front - Show KEY (Question)
+            <div className="text-center w-full">
               {currentItem.isCorrect !== undefined && (
                 <Badge 
                   variant="outline" 
@@ -112,16 +112,16 @@ export function ProgressOverlayFlashcard({
                   {currentItem.isCorrect ? "Correct" : "Incorrect"}
                 </Badge>
               )}
-              <p className="text-lg font-semibold mb-3">{currentItem.key}</p>
+              <p className="text-base font-semibold mb-3 px-2 line-clamp-3">{currentItem.key}</p>
               <p className="text-xs text-muted-foreground animate-pulse">
                 Tap to reveal answer
               </p>
             </div>
           ) : (
-            // Back - Show VALUE
+            // Back - Show VALUE (Answer)
             <div className="text-center w-full">
-              <p className="text-xs text-muted-foreground mb-2">{currentItem.key}</p>
-              <p className="text-base font-medium text-primary">{currentItem.value}</p>
+              <p className="text-xs text-muted-foreground mb-2 line-clamp-2">{currentItem.key}</p>
+              <p className="text-lg font-bold text-primary">{currentItem.value}</p>
             </div>
           )}
         </div>
