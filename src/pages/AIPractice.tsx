@@ -445,19 +445,60 @@ export default function AIPractice() {
       // Use writing time for writing module
       const finalTimeMinutes = activeModule === 'writing' ? writingTimeMinutes : timeMinutes;
 
-      const { data, error } = await supabase.functions.invoke('generate-ai-practice', {
-        body: {
-          module: activeModule,
-          questionType: currentQuestionType,
-          difficulty,
-          topicPreference: topicPreference.trim() || undefined,
-          questionCount,
-          timeMinutes: finalTimeMinutes,
-          readingConfig,
-          listeningConfig,
-          writingConfig,
-        },
-      });
+      // Use native fetch with extended timeout for long-running AI generation (listening TTS can take 3+ min)
+      const controller = new AbortController();
+      setAbortController(controller); // Store for cancel button
+      const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 minute timeout
+      
+      const session = await supabase.auth.getSession();
+      const accessToken = session.data.session?.access_token;
+      
+      let data: any;
+      let error: any;
+      
+      try {
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-ai-practice`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${accessToken}`,
+              'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            },
+            body: JSON.stringify({
+              module: activeModule,
+              questionType: currentQuestionType,
+              difficulty,
+              topicPreference: topicPreference.trim() || undefined,
+              questionCount,
+              timeMinutes: finalTimeMinutes,
+              readingConfig,
+              listeningConfig,
+              writingConfig,
+            }),
+            signal: controller.signal,
+          }
+        );
+        
+        clearTimeout(timeoutId);
+        
+        const responseData = await response.json();
+        
+        if (!response.ok) {
+          error = new Error(responseData.error || `Request failed with status ${response.status}`);
+          (error as any).edgeFunctionData = responseData;
+        } else {
+          data = responseData;
+        }
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          error = new Error('Request timed out. The AI generation is taking longer than expected. Please try again.');
+        } else {
+          error = fetchError;
+        }
+      }
 
       clearInterval(stepInterval);
 
