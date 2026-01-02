@@ -122,10 +122,13 @@ export default function AIPracticeReadingTest() {
 
     // Convert AI questions to expected format
     if (loadedTest.questionGroups && loadedTest.questionGroups.length > 0) {
-      const normalizeType = (raw: unknown, fallback?: string) => {
+      // Normalize question type - DO NOT use fallback, invalid types should be rejected upstream
+      const normalizeType = (raw: unknown) => {
         const t = String(raw ?? '').trim();
-        if (!t && fallback) return fallback;
-        if (!t) return 'FILL_IN_BLANK'; // Default fallback to prevent "undefined" in display
+        if (!t) {
+          console.error('Missing question_type in AI payload - test is malformed');
+          return null; // Return null to indicate invalid
+        }
         const upper = t.toUpperCase();
         // Reading renderer expects MULTIPLE_CHOICE for single-select
         if (upper === 'MULTIPLE_CHOICE_SINGLE') return 'MULTIPLE_CHOICE';
@@ -140,6 +143,12 @@ export default function AIPracticeReadingTest() {
 
       loadedTest.questionGroups.forEach((group) => {
         const groupType = normalizeType(group.question_type);
+        
+        // Skip groups with invalid/missing question_type
+        if (!groupType) {
+          console.error('Skipping question group with missing question_type:', group.id);
+          return;
+        }
 
         convertedGroups.push({
           id: group.id,
@@ -153,7 +162,7 @@ export default function AIPracticeReadingTest() {
         group.questions.forEach((q) => {
           // For TABLE_COMPLETION, get table_data from group options if not on question
           const tableData = q.table_data || (group.options as any)?.table_data || null;
-          const questionType = normalizeType(q.question_type || groupType);
+          const questionType = normalizeType(q.question_type) || groupType;
 
           convertedQuestions.push({
             id: q.id,
