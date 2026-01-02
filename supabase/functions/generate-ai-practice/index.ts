@@ -1802,6 +1802,168 @@ serve(async (req) => {
 
     console.log(`Generating ${module} test: ${questionType}, ${difficulty}, topic: ${topic}`);
 
+    // ============ PRESET LOOKUP - Check for published admin-generated tests first ============
+    // This saves credits and returns instantly if a matching preset exists
+    try {
+      let presetQuery = serviceClient
+        .from('generated_test_audio')
+        .select('*')
+        .eq('module', module)
+        .eq('is_published', true)
+        .eq('status', 'ready');
+      
+      // Match difficulty
+      if (difficulty) {
+        presetQuery = presetQuery.eq('difficulty', difficulty);
+      }
+      
+      // For listening/speaking, prefer tests with audio
+      if (module === 'listening') {
+        presetQuery = presetQuery.not('audio_url', 'is', null);
+      }
+      
+      // Match question type if specified and not mixed
+      if (questionType && questionType !== 'mixed' && questionType !== 'MIXED' && questionType !== 'FULL_TEST') {
+        presetQuery = presetQuery.eq('question_type', questionType);
+      }
+      
+      // Optionally match topic (fuzzy - if topic preference provided)
+      if (topicPreference) {
+        presetQuery = presetQuery.ilike('topic', `%${topicPreference}%`);
+      }
+      
+      // Limit to tests not used recently, order by least used
+      presetQuery = presetQuery.order('times_used', { ascending: true }).limit(10);
+      
+      const { data: presets, error: presetError } = await presetQuery;
+      
+      if (!presetError && presets && presets.length > 0) {
+        // Pick a random one from the pool to add variety
+        const preset = presets[Math.floor(Math.random() * presets.length)];
+        console.log(`Found preset test ${preset.id} for ${module}/${difficulty}/${questionType}`);
+        
+        // Update usage stats
+        await serviceClient
+          .from('generated_test_audio')
+          .update({ 
+            times_used: (preset.times_used || 0) + 1,
+            last_used_at: new Date().toISOString()
+          })
+          .eq('id', preset.id);
+        
+        // Build response based on module type using content_payload
+        const payload = preset.content_payload || {};
+        
+        if (module === 'listening') {
+          // Listening preset response
+          const responsePayload = {
+            testId: `preset-${preset.id}`,
+            topic: preset.topic,
+            transcript: preset.transcript || payload.dialogue || payload.transcript,
+            speakerNames: payload.speaker_names || payload.speakerNames,
+            audioUrl: preset.audio_url, // Pre-generated audio URL
+            audioBase64: null, // Not needed - using URL
+            audioFormat: 'wav',
+            sampleRate: 24000,
+            questionGroups: payload.questionGroups || [{
+              id: crypto.randomUUID(),
+              instruction: payload.instruction || 'Complete the questions below.',
+              question_type: preset.question_type || questionType,
+              start_question: 1,
+              end_question: (payload.questions?.length || 7),
+              options: payload.options || payload.groupOptions,
+              questions: payload.questions || [],
+            }],
+            isPreset: true,
+            presetId: preset.id,
+          };
+          
+          console.log(`Serving listening preset: ${preset.topic}`);
+          return new Response(JSON.stringify(responsePayload), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        } else if (module === 'speaking') {
+          // Speaking preset response
+          const responsePayload = {
+            testId: `preset-${preset.id}`,
+            topic: preset.topic,
+            speakingParts: payload.parts?.map((p: any, pIndex: number) => ({
+              id: crypto.randomUUID(),
+              part_number: p.part_number || pIndex + 1,
+              instruction: p.instruction || '',
+              questions: (p.questions || []).map((q: any, qIndex: number) => ({
+                id: crypto.randomUUID(),
+                question_number: q.question_number || qIndex + 1,
+                question_text: q.question_text || '',
+                sample_answer: q.sample_answer,
+              })),
+              cue_card_topic: p.cue_card_topic,
+              cue_card_content: p.cue_card_content,
+              preparation_time_seconds: p.preparation_time_seconds,
+              speaking_time_seconds: p.speaking_time_seconds,
+              time_limit_seconds: p.time_limit_seconds,
+            })) || payload.speakingParts || [],
+            audioUrls: payload.audioUrls, // Pre-generated TTS audio URLs
+            isPreset: true,
+            presetId: preset.id,
+          };
+          
+          console.log(`Serving speaking preset: ${preset.topic}`);
+          return new Response(JSON.stringify(responsePayload), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        } else if (module === 'reading') {
+          // Reading preset response
+          const responsePayload = {
+            testId: `preset-${preset.id}`,
+            topic: preset.topic,
+            passage: payload.passage || {
+              id: crypto.randomUUID(),
+              title: preset.topic,
+              content: payload.passageContent || '',
+            },
+            questionGroups: payload.questionGroups || [{
+              id: crypto.randomUUID(),
+              instruction: payload.instruction || 'Answer the questions below.',
+              question_type: preset.question_type || questionType,
+              start_question: 1,
+              end_question: (payload.questions?.length || 7),
+              options: payload.options,
+              questions: payload.questions || [],
+            }],
+            isPreset: true,
+            presetId: preset.id,
+          };
+          
+          console.log(`Serving reading preset: ${preset.topic}`);
+          return new Response(JSON.stringify(responsePayload), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        } else if (module === 'writing') {
+          // Writing preset response
+          const responsePayload = {
+            testId: `preset-${preset.id}`,
+            topic: preset.topic,
+            writingTask: payload.writingTask || payload,
+            isPreset: true,
+            presetId: preset.id,
+          };
+          
+          console.log(`Serving writing preset: ${preset.topic}`);
+          return new Response(JSON.stringify(responsePayload), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      } else {
+        console.log(`No preset found for ${module}/${difficulty}/${questionType}, proceeding with fresh generation`);
+      }
+    } catch (presetError) {
+      console.error('Preset lookup failed, continuing with generation:', presetError);
+      // Continue to normal generation
+    }
+
+    // ============ FRESH GENERATION (if no preset found) ============
+
     // Pre-flight validation
     const preflightResult = await preflightApiCheck(geminiApiKey, skipPreflight === true);
     if (!preflightResult.ok) {
