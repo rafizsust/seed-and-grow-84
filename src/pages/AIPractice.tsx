@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AILoadingScreen } from '@/components/common/AILoadingScreen';
 import { GeminiQuotaDisplay } from '@/components/common/GeminiQuotaDisplay';
@@ -122,58 +122,19 @@ const SPEAKING_PART_TYPES: { value: SpeakingPartType; label: string; description
   { value: 'PART_3', label: 'Part 3 Only', description: 'Discussion and abstract topics' },
 ];
 
-const DIFFICULTY_OPTIONS: { value: DifficultyLevel; label: string; color: string }[] = [
-  { value: 'easy', label: 'Easy', color: 'bg-success/20 text-success border-success/30' },
-  { value: 'medium', label: 'Medium', color: 'bg-warning/20 text-warning border-warning/30' },
-  { value: 'hard', label: 'Hard', color: 'bg-destructive/20 text-destructive border-destructive/30' },
-  { value: 'expert', label: 'Expert', color: 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border-purple-500/30' },
+const DIFFICULTY_OPTIONS: { value: DifficultyLevel; label: string; color: string; bandRange: string }[] = [
+  { value: 'easy', label: 'Easy', color: 'bg-success/20 text-success border-success/30', bandRange: 'Band 5.5-6.5' },
+  { value: 'medium', label: 'Medium', color: 'bg-warning/20 text-warning border-warning/30', bandRange: 'Band 7-8' },
+  { value: 'hard', label: 'Hard', color: 'bg-destructive/20 text-destructive border-destructive/30', bandRange: 'Band 8.5-9' },
 ];
 
-// Reading passage specifications - paragraph-based
-const READING_PASSAGE_PRESETS = {
-  short: { paragraphs: 2, label: 'Short (2 paragraphs)' },
-  medium: { paragraphs: 4, label: 'Medium (4 paragraphs)' },
-  long: { paragraphs: 6, label: 'Long (6 paragraphs)' },
-};
+// Reading passage specifications - fixed to 4 paragraphs
+const READING_PASSAGE_PARAGRAPHS = 4;
 
-// Listening configuration - audio length settings
-const LISTENING_AUDIO_CONFIG = {
-  minSeconds: 60,   // 1 min
-  maxSeconds: 240,  // 4 min max
-  defaultSeconds: 180, // 3 min default
-};
-
-// Speaker configuration options (Gemini TTS voices)
-const SPEAKER_GENDERS = [
-  { value: 'male', label: 'Male' },
-  { value: 'female', label: 'Female' },
-];
-
-const SPEAKER_ACCENTS = [
-  { value: 'en-GB', label: 'British' },
-  { value: 'en-AU', label: 'Australian' },
-  { value: 'en-US', label: 'US' },
-  { value: 'en-CA', label: 'Canadian' },
-];
-
-// Gemini TTS voice names mapped by gender
-const SPEAKER_VOICES = {
-  male: [
-    { value: 'Charon', label: 'Charon (Informative)' },
-    { value: 'Puck', label: 'Puck (Upbeat)' },
-    { value: 'Fenrir', label: 'Fenrir (Excitable)' },
-    { value: 'Orus', label: 'Orus (Firm)' },
-    { value: 'Iapetus', label: 'Iapetus (Clear)' },
-  ],
-  female: [
-    { value: 'Aoede', label: 'Aoede (Breezy)' },
-    { value: 'Kore', label: 'Kore (Firm)' },
-    { value: 'Leda', label: 'Leda (Youthful)' },
-    { value: 'Zephyr', label: 'Zephyr (Bright)' },
-    { value: 'Callirrhoe', label: 'Callirrhoe (Easy-going)' },
-  ],
-};
-
+// Listening configuration - fixed 4 min audio
+const LISTENING_AUDIO_DURATION_SECONDS = 240; // 4 min fixed
+// Fixed question count for Reading and Listening
+const FIXED_QUESTION_COUNT = 7;
 // Question types that require 2 speakers
 const MULTI_SPEAKER_QUESTION_TYPES: ListeningQuestionType[] = [
   'FILL_IN_BLANK',
@@ -287,13 +248,12 @@ export default function AIPractice() {
     };
   }, [selectedVoice]);
 
-  // Reading-specific configuration
-  const [readingPassagePreset, setReadingPassagePreset] = useState<keyof typeof READING_PASSAGE_PRESETS>('medium');
-  const [customQuestionCount, setCustomQuestionCount] = useState(5);
+  // Reading-specific configuration - fixed values
+  const readingQuestionCount = FIXED_QUESTION_COUNT;
 
-  // Listening-specific configuration
-  const [listeningAudioDuration, setListeningAudioDuration] = useState(LISTENING_AUDIO_CONFIG.defaultSeconds);
-  const [listeningQuestionCount, setListeningQuestionCount] = useState(5);
+  // Listening-specific configuration - fixed values  
+  const listeningAudioDuration = LISTENING_AUDIO_DURATION_SECONDS;
+  const listeningQuestionCount = FIXED_QUESTION_COUNT;
   
   // IELTS Part 1 Spelling Mode configuration for Fill-in-Blank
   const [spellingModeEnabled, setSpellingModeEnabled] = useState(false);
@@ -304,17 +264,17 @@ export default function AIPractice() {
   // Monologue mode for Fill-in-Blank (single speaker like IELTS Part 4)
   const [monologueModeEnabled, setMonologueModeEnabled] = useState(false);
   
-  // Speaker configuration
-  const [speaker1Config, setSpeaker1Config] = useState<SpeakerConfig>({
+  // Speaker configuration - default values used in API call
+  const speaker1Config: SpeakerConfig = {
     gender: 'female',
     accent: 'en-GB',
     voiceName: 'Kore',
-  });
-  const [speaker2Config, setSpeaker2Config] = useState<SpeakerConfig>({
+  };
+  const speaker2Config: SpeakerConfig = {
     gender: 'male',
     accent: 'en-GB',
     voiceName: 'Puck',
-  });
+  };
 
   // Determine if current question type needs 2 speakers
   // For Fill-in-Blank, this is overridden by monologue mode toggle
@@ -332,9 +292,9 @@ export default function AIPractice() {
     : activeModule === 'writing' ? writingTaskType
     : speakingPartType;
   
-  // For reading and listening, use custom question count; for others, use predefined counts
+  // For reading and listening, use fixed question count; for others, use predefined counts
   const questionCount = activeModule === 'reading' 
-    ? customQuestionCount 
+    ? readingQuestionCount 
     : activeModule === 'listening'
     ? listeningQuestionCount
     : (QUESTION_COUNTS[currentQuestionType] || 5);
@@ -398,10 +358,10 @@ export default function AIPractice() {
     }, 3000);
 
     try {
-      // Build reading-specific configuration - simplified to paragraphs only
+      // Build reading-specific configuration - fixed 4 paragraphs
       const readingConfig = activeModule === 'reading' ? {
-        passagePreset: readingPassagePreset,
-        paragraphCount: READING_PASSAGE_PRESETS[readingPassagePreset].paragraphs,
+        passagePreset: 'medium',
+        paragraphCount: READING_PASSAGE_PARAGRAPHS,
       } : undefined;
 
       // Build listening-specific configuration with speaker settings
@@ -639,12 +599,9 @@ export default function AIPractice() {
     return { text: '3-4 minutes', seconds: 210 };
   };
 
-  // Calculate estimated generation time for reading based on passage length
+  // Calculate estimated generation time for reading based on fixed passage length
   const getReadingEstimate = () => {
-    const paragraphCount = READING_PASSAGE_PRESETS[readingPassagePreset].paragraphs;
-    
-    if (paragraphCount <= 2) return { text: '10-20 seconds', seconds: 15 };
-    if (paragraphCount <= 3) return { text: '15-25 seconds', seconds: 20 };
+    // Fixed 4 paragraphs
     return { text: '20-35 seconds', seconds: 27 };
   };
 
@@ -796,51 +753,18 @@ export default function AIPractice() {
                     </div>
                   </div>
 
-                  {/* Passage Configuration */}
+                  {/* Fixed Configuration Info */}
                   <div className="space-y-4 border-t pt-6">
-                    <Label className="text-base font-medium flex items-center gap-2">
-                      <Settings2 className="w-4 h-4" />
-                      Passage Configuration
-                    </Label>
-                    
-                    {/* Preset Selection */}
-                    <RadioGroup 
-                      value={readingPassagePreset} 
-                      onValueChange={(v) => setReadingPassagePreset(v as keyof typeof READING_PASSAGE_PRESETS)}
-                      className="grid grid-cols-1 sm:grid-cols-2 gap-3"
-                    >
-                      {Object.entries(READING_PASSAGE_PRESETS).map(([key, preset]) => (
-                        <div key={key} className="flex items-center space-x-2">
-                          <RadioGroupItem value={key} id={`preset-${key}`} />
-                          <Label htmlFor={`preset-${key}`} className="cursor-pointer">
-                            {preset.label}
-                          </Label>
+                    <div className="p-4 rounded-lg bg-muted/50 border">
+                      <div className="flex items-start gap-3">
+                        <Target className="w-5 h-5 text-primary mt-0.5" />
+                        <div>
+                          <div className="font-medium text-sm">Test Configuration</div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {READING_PASSAGE_PARAGRAPHS} paragraphs • {FIXED_QUESTION_COUNT} questions
+                          </p>
                         </div>
-                      ))}
-                    </RadioGroup>
-
-                  </div>
-
-                  {/* Question Count */}
-                  <div className="space-y-3 border-t pt-6">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-base font-medium flex items-center gap-2">
-                        <Target className="w-4 h-4" />
-                        Number of Questions
-                      </Label>
-                      <Badge variant="secondary">{customQuestionCount} questions</Badge>
-                    </div>
-                    <Slider
-                      value={[customQuestionCount]}
-                      onValueChange={([v]) => setCustomQuestionCount(v)}
-                      min={1}
-                      max={10}
-                      step={1}
-                    />
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>1 (Quick)</span>
-                      <span>5 (Default)</span>
-                      <span>10 (Max)</span>
+                      </div>
                     </div>
                   </div>
                 </CardContent>
@@ -906,174 +830,28 @@ export default function AIPractice() {
                     </div>
                   )}
 
-                  {/* Speaker Configuration */}
+                  {/* Fixed Configuration Info */}
                   <div className="space-y-4 border-t pt-6">
-                    <Label className="text-base font-medium flex items-center gap-2">
-                      <Mic className="w-4 h-4" />
-                      Speaker Configuration
-                    </Label>
-                    <p className="text-sm text-muted-foreground">
-                      {needsTwoSpeakers 
-                        ? 'Configure both speakers for the dialogue.' 
-                        : 'Configure the narrator voice for this question type.'}
-                    </p>
-
-                    {/* Speaker 1 */}
-                    <div className="p-4 rounded-lg border bg-card space-y-4">
-                      <div className="font-medium text-sm">Speaker 1</div>
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="space-y-2">
-                          <Label className="text-xs text-muted-foreground">Gender</Label>
-                          <Select
-                            value={speaker1Config.gender}
-                            onValueChange={(v: 'male' | 'female') => {
-                              const defaultVoice = SPEAKER_VOICES[v][0].value;
-                              setSpeaker1Config(prev => ({ ...prev, gender: v, voiceName: defaultVoice }));
-                            }}
-                          >
-                            <SelectTrigger className="h-9">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {SPEAKER_GENDERS.map(g => (
-                                <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-xs text-muted-foreground">Accent</Label>
-                          <Select
-                            value={speaker1Config.accent}
-                            onValueChange={(v) => setSpeaker1Config(prev => ({ ...prev, accent: v }))}
-                          >
-                            <SelectTrigger className="h-9">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {SPEAKER_ACCENTS.map(a => (
-                                <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-xs text-muted-foreground">Voice</Label>
-                          <Select
-                            value={speaker1Config.voiceName}
-                            onValueChange={(v) => setSpeaker1Config(prev => ({ ...prev, voiceName: v }))}
-                          >
-                            <SelectTrigger className="h-9">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {SPEAKER_VOICES[speaker1Config.gender].map(voice => (
-                                <SelectItem key={voice.value} value={voice.value}>{voice.label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                    <div className="p-4 rounded-lg bg-muted/50 border">
+                      <div className="flex items-start gap-3">
+                        <Settings2 className="w-5 h-5 text-primary mt-0.5" />
+                        <div>
+                          <div className="font-medium text-sm">Test Configuration</div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            4 min audio • {FIXED_QUESTION_COUNT} questions
+                          </p>
                         </div>
                       </div>
-                    </div>
-
-                    {/* Speaker 2 - only shown for multi-speaker question types */}
-                    {needsTwoSpeakers && (
-                      <div className="p-4 rounded-lg border bg-card space-y-4">
-                        <div className="font-medium text-sm">Speaker 2</div>
-                        <div className="grid grid-cols-3 gap-3">
-                          <div className="space-y-2">
-                            <Label className="text-xs text-muted-foreground">Gender</Label>
-                            <Select
-                              value={speaker2Config.gender}
-                              onValueChange={(v: 'male' | 'female') => {
-                                const defaultVoice = SPEAKER_VOICES[v][0].value;
-                                setSpeaker2Config(prev => ({ ...prev, gender: v, voiceName: defaultVoice }));
-                              }}
-                            >
-                              <SelectTrigger className="h-9">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {SPEAKER_GENDERS.map(g => (
-                                  <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-xs text-muted-foreground">Accent</Label>
-                            <Select
-                              value={speaker2Config.accent}
-                              onValueChange={(v) => setSpeaker2Config(prev => ({ ...prev, accent: v }))}
-                            >
-                              <SelectTrigger className="h-9">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {SPEAKER_ACCENTS.map(a => (
-                                  <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-xs text-muted-foreground">Voice</Label>
-                            <Select
-                              value={speaker2Config.voiceName}
-                              onValueChange={(v) => setSpeaker2Config(prev => ({ ...prev, voiceName: v }))}
-                            >
-                              <SelectTrigger className="h-9">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {SPEAKER_VOICES[speaker2Config.gender].map(voice => (
-                                  <SelectItem key={voice.value} value={voice.value}>{voice.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Audio Length Configuration - Slider */}
-                  <div className="space-y-4 border-t pt-6">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-base font-medium flex items-center gap-2">
-                        <Settings2 className="w-4 h-4" />
-                        Audio Length
-                      </Label>
-                      <span className="text-sm font-medium">{Math.floor(listeningAudioDuration / 60)} min {listeningAudioDuration % 60 > 0 ? `${listeningAudioDuration % 60}s` : ''}</span>
-                    </div>
-                    <Slider
-                      value={[listeningAudioDuration]}
-                      onValueChange={([v]) => setListeningAudioDuration(v)}
-                      min={LISTENING_AUDIO_CONFIG.minSeconds}
-                      max={LISTENING_AUDIO_CONFIG.maxSeconds}
-                      step={30}
-                      className="w-full"
-                    />
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>1 min</span>
-                      <span>3 min (Default)</span>
-                      <span>4 min</span>
                     </div>
 
                     {/* Estimated Generation Time */}
-                    {(() => {
-                      const durationSec = listeningAudioDuration;
-                      const estimatedGenTime = durationSec <= 90 ? '60-120 sec' : durationSec <= 120 ? '90-150 sec' : durationSec <= 180 ? '2-3 min' : '3-4 min';
-                      return (
-                        <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
-                          <Clock className="w-4 h-4 text-primary" />
-                          <span className="text-sm">
-                            <span className="text-muted-foreground">Estimated generation time:</span>{' '}
-                            <span className="font-medium text-primary">{estimatedGenTime}</span>
-                          </span>
-                        </div>
-                      );
-                    })()}
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
+                      <Clock className="w-4 h-4 text-primary" />
+                      <span className="text-sm">
+                        <span className="text-muted-foreground">Estimated generation time:</span>{' '}
+                        <span className="font-medium text-primary">3-4 min</span>
+                      </span>
+                    </div>
                   </div>
 
                   {/* IELTS Part 1 Spelling Mode - Only for Fill-in-Blank when NOT in monologue mode */}
@@ -1141,27 +919,6 @@ export default function AIPractice() {
                       )}
                     </div>
                   )}
-
-                  {/* Question Count */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-base font-medium">Number of Questions</Label>
-                      <span className="text-sm font-medium">{listeningQuestionCount}</span>
-                    </div>
-                    <Slider
-                      value={[listeningQuestionCount]}
-                      onValueChange={([v]) => setListeningQuestionCount(v)}
-                      min={1}
-                      max={10}
-                      step={1}
-                      className="w-full"
-                    />
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>1 (Quick)</span>
-                      <span>5 (Default)</span>
-                      <span>10 (Max)</span>
-                    </div>
-                  </div>
 
                   {/* Audio Speed */}
                   <div className="space-y-3">
@@ -1414,7 +1171,7 @@ export default function AIPractice() {
                   <Target className="w-4 h-4" />
                   Difficulty Level
                 </Label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   {DIFFICULTY_OPTIONS.map((opt) => (
                     <SelectableCard
                       key={opt.value}
@@ -1422,7 +1179,10 @@ export default function AIPractice() {
                       onClick={() => setDifficulty(opt.value)}
                       className={difficulty === opt.value ? opt.color : ''}
                     >
-                      <div className="font-medium text-center pr-4">{opt.label}</div>
+                      <div className="text-center pr-4">
+                        <div className="font-medium">{opt.label}</div>
+                        <div className="text-xs text-muted-foreground">{opt.bandRange}</div>
+                      </div>
                     </SelectableCard>
                   ))}
                 </div>
@@ -1473,17 +1233,19 @@ export default function AIPractice() {
                     })}
                   </div>
 
-                  {/* Custom topic input */}
-                  <div className="flex flex-col gap-2 max-w-md">
-                    <Label className="text-sm text-muted-foreground">Or type your own:</Label>
-                    <Input
-                      id="topic"
-                      value={topicPreference}
-                      onChange={(e) => setTopicPreference(e.target.value.slice(0, 100))}
-                      placeholder="Enter custom topic..."
-                      maxLength={100}
-                    />
-                  </div>
+                  {/* Custom topic input - only for Speaking */}
+                  {activeModule === 'speaking' && (
+                    <div className="flex flex-col gap-2 max-w-md">
+                      <Label className="text-sm text-muted-foreground">Or type your own:</Label>
+                      <Input
+                        id="topic"
+                        value={topicPreference}
+                        onChange={(e) => setTopicPreference(e.target.value.slice(0, 100))}
+                        placeholder="Enter custom topic..."
+                        maxLength={100}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1509,7 +1271,7 @@ export default function AIPractice() {
                     <span>2 min</span>
                     <span>
                       {activeModule === 'reading' 
-                        ? `Recommended: ${Math.ceil(customQuestionCount * 2)} min`
+                        ? `Recommended: ${Math.ceil(readingQuestionCount * 2)} min`
                         : `Recommended: ${Math.min(10, getDefaultTime(questionCount))} min`
                       }
                     </span>

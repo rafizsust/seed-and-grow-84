@@ -4,12 +4,13 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Star, Mic, MessageSquareText, Lightbulb, CheckCircle2, History, AlertCircle, PlayCircle, FileText } from 'lucide-react'; // Added FileText icon for transcript
+import { ArrowLeft, Star, Mic, MessageSquareText, Lightbulb, CheckCircle2, History, AlertCircle, PlayCircle, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { Tables } from '@/integrations/supabase/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { renderRichText } from '@/components/admin/RichTextEditor'; // Reusing RichTextEditor's render function
+import { renderRichText } from '@/components/admin/RichTextEditor';
+
 
 type SpeakingTest = Tables<'speaking_tests'>;
 type SpeakingSubmission = Tables<'speaking_submissions'>;

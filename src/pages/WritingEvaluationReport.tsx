@@ -9,7 +9,8 @@ import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { Tables } from '@/integrations/supabase/types';
 import { renderRichText } from '@/components/admin/RichTextEditor';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // Import Select components
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
 
 type WritingTest = Tables<'writing_tests'>;
 type WritingTask = Tables<'writing_tasks'>;
