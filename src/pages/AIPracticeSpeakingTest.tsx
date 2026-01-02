@@ -129,6 +129,7 @@ export default function AIPracticeSpeakingTest() {
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const part2SpeakStartRef = useRef<number>(0);
+  const presetAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const activeAudioKeyRef = useRef<string | null>(null);
   const activeAudioStartRef = useRef<number>(0);
@@ -143,6 +144,9 @@ export default function AIPracticeSpeakingTest() {
   useEffect(() => {
     audioSegmentsRef.current = audioSegments;
   }, [audioSegments]);
+
+  // Get audio URLs from preset test
+  const audioUrls = useMemo(() => test?.speakingAudioUrls || {}, [test]);
 
   // Get current part data
   const speakingParts = useMemo(() => {
@@ -351,7 +355,73 @@ export default function AIPracticeSpeakingTest() {
     });
   };
 
-  const speakText = (text: string) => {
+  // Play pre-recorded audio URL with fallback to TTS
+  const playPresetAudio = (audioKey: string, text: string): boolean => {
+    const url = audioUrls[audioKey];
+    if (!url) return false;
+
+    // Stop any existing preset audio
+    if (presetAudioRef.current) {
+      presetAudioRef.current.pause();
+      presetAudioRef.current = null;
+    }
+
+    const audio = new Audio(url);
+    presetAudioRef.current = audio;
+    setCurrentSpeakingText(text);
+
+    audio.onended = () => {
+      setCurrentSpeakingText('');
+      presetAudioRef.current = null;
+      handleTTSCompleteRef.current();
+    };
+
+    audio.onerror = () => {
+      console.warn(`Failed to play preset audio: ${audioKey}, falling back to TTS`);
+      presetAudioRef.current = null;
+      // Fall back to TTS
+      if (!isMutedRef.current) {
+        tts.speak(text);
+      } else {
+        // Simulate TTS duration for muted mode
+        setTimeout(() => {
+          setCurrentSpeakingText('');
+          handleTTSCompleteRef.current();
+        }, Math.max(2000, text.length * 50));
+      }
+    };
+
+    if (!isMutedRef.current) {
+      audio.play().catch((err) => {
+        console.error('Audio play failed:', err);
+        audio.onerror?.(new Event('error'));
+      });
+    } else {
+      // Muted mode - simulate audio duration
+      setTimeout(() => {
+        setCurrentSpeakingText('');
+        presetAudioRef.current = null;
+        handleTTSCompleteRef.current();
+      }, Math.max(2000, text.length * 50));
+    }
+
+    return true;
+  };
+
+  // Helper to get audio key for question
+  const getQuestionAudioKey = (partNum: number, qIdx: number): string => {
+    return `part${partNum}_q${qIdx + 1}`;
+  };
+
+  const speakText = (text: string, audioKey?: string) => {
+    // Try to play preset audio first
+    if (audioKey && Object.keys(audioUrls).length > 0) {
+      if (playPresetAudio(audioKey, text)) {
+        return;
+      }
+    }
+
+    // Fall back to browser TTS
     if (isMutedRef.current) {
       setCurrentSpeakingText(text);
       // Simulate TTS duration based on text length
@@ -368,7 +438,7 @@ export default function AIPracticeSpeakingTest() {
   const endTest = () => {
     setTimeLeft(0);
     setPhase('ending');
-    speakText('Thank you. That is the end of the speaking test.');
+    speakText('Thank you. That is the end of the speaking test.', 'test_ending');
   };
 
   // Function to send a part for background evaluation
@@ -567,7 +637,7 @@ export default function AIPracticeSpeakingTest() {
     
     if (part3) {
       setPhase('part3_intro');
-      speakText(part3.instruction);
+      speakText(part3.instruction, 'part3_instruction');
     } else {
       endTest();
     }
@@ -614,7 +684,7 @@ export default function AIPracticeSpeakingTest() {
     
     if (part2) {
       setPhase('part2_intro');
-      speakText(part2.instruction);
+      speakText(part2.instruction, 'part2_instruction');
     } else if (speakingPartsRef.current.part3) {
       startPart3();
     } else {
@@ -633,7 +703,7 @@ export default function AIPracticeSpeakingTest() {
     setTimeLeft(0);
 
     // Keep phase as part2_prep so onEnd starts recording + timer after TTS finishes
-    speakText("Please start speaking now. You have two minutes.");
+    speakText("Please start speaking now. You have two minutes.", 'part2_start_speaking');
   };
 
   // Handle stopping recording early and moving to next question/part
@@ -657,7 +727,7 @@ export default function AIPracticeSpeakingTest() {
       if (part1?.questions && nextIdx < part1.questions.length) {
         setQuestionIndex(nextIdx);
         setPhase('part1_question');
-        speakText(part1.questions[nextIdx].question_text);
+        speakText(part1.questions[nextIdx].question_text, getQuestionAudioKey(1, nextIdx));
       } else {
         transitionAfterPart1();
       }
@@ -677,7 +747,7 @@ export default function AIPracticeSpeakingTest() {
       if (part3?.questions && nextIdx < part3.questions.length) {
         setQuestionIndex(nextIdx);
         setPhase('part3_question');
-        speakText(part3.questions[nextIdx].question_text);
+        speakText(part3.questions[nextIdx].question_text, getQuestionAudioKey(3, nextIdx));
       } else {
         endTest();
       }
@@ -694,7 +764,7 @@ export default function AIPracticeSpeakingTest() {
       const part1 = parts.part1;
       if (part1?.questions?.[0]) {
         setPhase('part1_question');
-        speakText(part1.questions[0].question_text);
+        speakText(part1.questions[0].question_text, getQuestionAudioKey(1, 0));
       }
     } else if (currentPhase === 'part1_question') {
       // Start recording for Part 1
@@ -733,7 +803,7 @@ export default function AIPracticeSpeakingTest() {
       const part3 = parts.part3;
       if (part3?.questions?.[0]) {
         setPhase('part3_question');
-        speakText(part3.questions[0].question_text);
+        speakText(part3.questions[0].question_text, getQuestionAudioKey(3, 0));
       }
     } else if (currentPhase === 'part3_question') {
       // Start recording for Part 3
@@ -759,13 +829,13 @@ export default function AIPracticeSpeakingTest() {
       if (part1?.questions && nextIdx < part1.questions.length) {
         setQuestionIndex(nextIdx);
         setPhase('part1_question');
-        speakText(part1.questions[nextIdx].question_text);
+        speakText(part1.questions[nextIdx].question_text, getQuestionAudioKey(1, nextIdx));
       } else {
         transitionAfterPart1();
       }
     } else if (currentPhase === 'part2_prep') {
       // Start Part 2 recording
-      speakText("Your one minute preparation time is over. Please start speaking now. You have two minutes.");
+      speakText("Your one minute preparation time is over. Please start speaking now. You have two minutes.", 'part2_start_speaking');
     } else if (currentPhase === 'part2_recording') {
       stopRecording();
       const duration = (Date.now() - part2SpeakStartRef.current) / 1000;
@@ -782,7 +852,7 @@ export default function AIPracticeSpeakingTest() {
       if (part3?.questions && nextIdx < part3.questions.length) {
         setQuestionIndex(nextIdx);
         setPhase('part3_question');
-        speakText(part3.questions[nextIdx].question_text);
+        speakText(part3.questions[nextIdx].question_text, getQuestionAudioKey(3, nextIdx));
       } else {
         endTest();
       }
@@ -864,7 +934,7 @@ export default function AIPracticeSpeakingTest() {
     if (speakingParts.part1) {
       setCurrentPart(1);
       setPhase('part1_intro');
-      speakText(speakingParts.part1.instruction);
+      speakText(speakingParts.part1.instruction, 'part1_instruction');
     } else if (speakingParts.part2) {
       startPart2();
     } else if (speakingParts.part3) {

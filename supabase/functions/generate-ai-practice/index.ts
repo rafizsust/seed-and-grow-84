@@ -1883,32 +1883,80 @@ serve(async (req) => {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         } else if (module === 'speaking') {
-          // Speaking preset response
+          // Speaking preset response - transform part1/part2/part3 structure to speakingParts array
+          const speakingParts: any[] = [];
+          
+          // Helper to transform part data
+          const transformPart = (partData: any, partNum: number) => {
+            if (!partData) return null;
+            
+            // Questions could be array of strings or array of objects
+            const questions = Array.isArray(partData.questions) 
+              ? partData.questions.map((q: any, qIndex: number) => ({
+                  id: crypto.randomUUID(),
+                  question_number: qIndex + 1,
+                  question_text: typeof q === 'string' ? q : (q.question_text || q),
+                  sample_answer: typeof q === 'object' ? q.sample_answer : undefined,
+                }))
+              : [];
+            
+            // Sample answers could be separate array
+            if (Array.isArray(partData.sample_answers) && partData.sample_answers.length > 0) {
+              partData.sample_answers.forEach((answer: string, idx: number) => {
+                if (questions[idx]) {
+                  questions[idx].sample_answer = answer;
+                }
+              });
+            }
+            
+            return {
+              id: crypto.randomUUID(),
+              part_number: partNum,
+              instruction: partData.instruction || '',
+              questions,
+              cue_card_topic: partData.cue_card_topic,
+              cue_card_content: partData.cue_card_content,
+              preparation_time_seconds: partData.preparation_time_seconds || (partNum === 2 ? 60 : undefined),
+              speaking_time_seconds: partData.speaking_time_seconds || (partNum === 2 ? 120 : undefined),
+              time_limit_seconds: partData.time_limit_seconds || (partNum === 1 || partNum === 3 ? 300 : undefined),
+            };
+          };
+          
+          // Check for part1/part2/part3 structure
+          if (payload.part1) {
+            const part = transformPart(payload.part1, 1);
+            if (part) speakingParts.push(part);
+          }
+          if (payload.part2) {
+            const part = transformPart(payload.part2, 2);
+            if (part) speakingParts.push(part);
+          }
+          if (payload.part3) {
+            const part = transformPart(payload.part3, 3);
+            if (part) speakingParts.push(part);
+          }
+          
+          // Fallback to parts array or speakingParts if already in correct format
+          if (speakingParts.length === 0 && payload.parts) {
+            payload.parts.forEach((p: any, pIndex: number) => {
+              const part = transformPart(p, p.part_number || pIndex + 1);
+              if (part) speakingParts.push(part);
+            });
+          }
+          if (speakingParts.length === 0 && payload.speakingParts) {
+            speakingParts.push(...payload.speakingParts);
+          }
+          
           const responsePayload = {
             testId: `preset-${preset.id}`,
             topic: preset.topic,
-            speakingParts: payload.parts?.map((p: any, pIndex: number) => ({
-              id: crypto.randomUUID(),
-              part_number: p.part_number || pIndex + 1,
-              instruction: p.instruction || '',
-              questions: (p.questions || []).map((q: any, qIndex: number) => ({
-                id: crypto.randomUUID(),
-                question_number: q.question_number || qIndex + 1,
-                question_text: q.question_text || '',
-                sample_answer: q.sample_answer,
-              })),
-              cue_card_topic: p.cue_card_topic,
-              cue_card_content: p.cue_card_content,
-              preparation_time_seconds: p.preparation_time_seconds,
-              speaking_time_seconds: p.speaking_time_seconds,
-              time_limit_seconds: p.time_limit_seconds,
-            })) || payload.speakingParts || [],
+            speakingParts,
             audioUrls: payload.audioUrls, // Pre-generated TTS audio URLs
             isPreset: true,
             presetId: preset.id,
           };
           
-          console.log(`Serving speaking preset: ${preset.topic}`);
+          console.log(`Serving speaking preset: ${preset.topic}, parts: ${speakingParts.length}`);
           return new Response(JSON.stringify(responsePayload), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
