@@ -21,6 +21,54 @@ interface GenerationResult {
   usedFallback?: boolean;
 }
 
+// Validate that a generated/preset test has proper structure
+function validateTestPayload(data: any, module: string): { valid: boolean; reason?: string } {
+  if (!data) return { valid: false, reason: 'Empty payload' };
+  
+  // Check for questionGroups
+  const questionGroups = data.questionGroups;
+  if (!questionGroups || !Array.isArray(questionGroups) || questionGroups.length === 0) {
+    return { valid: false, reason: 'Missing or empty questionGroups' };
+  }
+  
+  // Validate each group has required fields
+  for (let i = 0; i < questionGroups.length; i++) {
+    const group = questionGroups[i];
+    
+    // Must have question_type
+    if (!group.question_type || typeof group.question_type !== 'string' || group.question_type.trim() === '') {
+      return { valid: false, reason: `Group ${i + 1} missing question_type` };
+    }
+    
+    // Must have questions array
+    if (!group.questions || !Array.isArray(group.questions) || group.questions.length === 0) {
+      return { valid: false, reason: `Group ${i + 1} has no questions` };
+    }
+    
+    // Validate each question has required fields
+    for (let j = 0; j < group.questions.length; j++) {
+      const q = group.questions[j];
+      if (!q.question_number || !q.correct_answer) {
+        return { valid: false, reason: `Group ${i + 1} question ${j + 1} missing required fields` };
+      }
+    }
+  }
+  
+  // Module-specific validation
+  if (module === 'reading') {
+    if (!data.passage || !data.passage.content) {
+      return { valid: false, reason: 'Reading test missing passage content' };
+    }
+  }
+  
+  if (module === 'listening') {
+    // Listening tests should have audio or transcript
+    // (audio might be generated separately, so just check questionGroups for now)
+  }
+  
+  return { valid: true };
+}
+
 export function useAIGenerationWithFallback() {
   const { user } = useAuth();
   const [isGenerating, setIsGenerating] = useState(false);
@@ -39,50 +87,93 @@ export function useAIGenerationWithFallback() {
     setIsGenerating(true);
     setProgress(10);
 
-    try {
-      // Attempt AI generation
-      setProgress(30);
-      
-      const { data, error } = await supabase.functions.invoke('generate-ai-practice', {
-        body: options,
-      });
+    // Retry generation up to 2 times before falling back
+    const MAX_GENERATION_RETRIES = 2;
+    let lastError: string | null = null;
 
-      // Check if aborted
-      if (signal.aborted) {
-        return { success: false, error: 'Generation cancelled' };
+    for (let attempt = 1; attempt <= MAX_GENERATION_RETRIES; attempt++) {
+      try {
+        if (signal.aborted) {
+          return { success: false, error: 'Generation cancelled' };
+        }
+
+        console.log(`AI generation attempt ${attempt}/${MAX_GENERATION_RETRIES}...`);
+        setProgress(10 + (attempt - 1) * 25);
+        
+        const { data, error } = await supabase.functions.invoke('generate-ai-practice', {
+          body: options,
+        });
+
+        if (signal.aborted) {
+          return { success: false, error: 'Generation cancelled' };
+        }
+
+        setProgress(50 + (attempt - 1) * 20);
+
+        // Handle credit limit error - don't retry, go straight to fallback
+        if (data?.errorCode === 'CREDIT_LIMIT_EXCEEDED') {
+          console.log('Credit limit reached, attempting fallback...');
+          return await tryFallback(options.module, signal);
+        }
+
+        // Handle generation errors
+        if (error || data?.error) {
+          lastError = error?.message || data?.error || 'Generation failed';
+          console.error(`AI generation attempt ${attempt} failed:`, lastError);
+          
+          // If this is the last attempt, try fallback
+          if (attempt === MAX_GENERATION_RETRIES) {
+            console.log('All generation attempts failed, trying fallback...');
+            return await tryFallback(options.module, signal);
+          }
+          
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          continue;
+        }
+
+        // Validate the response
+        const validation = validateTestPayload(data, options.module);
+        if (!validation.valid) {
+          lastError = `Invalid AI response: ${validation.reason}`;
+          console.error(`AI generation attempt ${attempt} returned invalid data:`, validation.reason);
+          
+          // If this is the last attempt, try fallback
+          if (attempt === MAX_GENERATION_RETRIES) {
+            console.log('All generation attempts returned invalid data, trying fallback...');
+            return await tryFallback(options.module, signal);
+          }
+          
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          continue;
+        }
+
+        // Success!
+        setProgress(100);
+        return { success: true, data, usedFallback: false };
+
+      } catch (err: any) {
+        if (signal.aborted) {
+          return { success: false, error: 'Generation cancelled' };
+        }
+
+        lastError = err.message || 'Unknown error';
+        console.error(`Generation attempt ${attempt} error:`, err);
+        
+        // If this is the last attempt, try fallback
+        if (attempt === MAX_GENERATION_RETRIES) {
+          console.log('All generation attempts threw errors, trying fallback...');
+          return await tryFallback(options.module, signal);
+        }
+        
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
-
-      setProgress(70);
-
-      // Handle credit limit error specifically
-      if (data?.errorCode === 'CREDIT_LIMIT_EXCEEDED') {
-        // Try fallback to test_presets
-        console.log('Credit limit reached, attempting fallback...');
-        return await tryFallback(options.module, signal);
-      }
-
-      // Handle other errors
-      if (error || data?.error) {
-        console.error('AI generation failed:', error || data?.error);
-        // Try fallback
-        return await tryFallback(options.module, signal);
-      }
-
-      setProgress(100);
-      return { success: true, data, usedFallback: false };
-
-    } catch (err: any) {
-      if (signal.aborted) {
-        return { success: false, error: 'Generation cancelled' };
-      }
-
-      console.error('Generation error:', err);
-      // Try fallback on any error
-      return await tryFallback(options.module, signal);
-    } finally {
-      setIsGenerating(false);
-      setProgress(0);
     }
+
+    // Should not reach here, but just in case
+    return { success: false, error: lastError || 'Generation failed after all retries' };
   }, [user]);
 
   const tryFallback = async (module: string, signal: AbortSignal): Promise<GenerationResult> => {
@@ -92,8 +183,9 @@ export function useAIGenerationWithFallback() {
       }
 
       console.log(`Attempting fallback for module: ${module}`);
+      setProgress(75);
 
-      // Fetch a random published preset for this module
+      // Fetch published presets for this module
       const { data: presets, error } = await supabase
         .from('test_presets')
         .select('*')
@@ -105,20 +197,44 @@ export function useAIGenerationWithFallback() {
       if (!presets || presets.length === 0) {
         return { 
           success: false, 
-          error: 'No fallback tests available. Please try again later or add your own API key.' 
+          error: 'Generation failed and no fallback tests available. Please try again later or add your own API key.' 
         };
       }
 
-      // Pick random preset
-      const randomIndex = Math.floor(Math.random() * presets.length);
-      const preset = presets[randomIndex];
+      // Filter presets to only include valid ones
+      const validPresets = presets.filter(preset => {
+        const payload = typeof preset.payload === 'object' && preset.payload !== null 
+          ? preset.payload as Record<string, unknown>
+          : null;
+        
+        if (!payload) return false;
+        
+        const validation = validateTestPayload(payload, module);
+        if (!validation.valid) {
+          console.warn(`Preset ${preset.id} (${preset.topic}) is invalid: ${validation.reason}`);
+          return false;
+        }
+        
+        return true;
+      });
 
-      console.log(`Using fallback preset: ${preset.topic}`);
+      if (validPresets.length === 0) {
+        return { 
+          success: false, 
+          error: 'Generation failed and no valid fallback tests available. Please try again later.' 
+        };
+      }
 
-      const payload = typeof preset.payload === 'object' && preset.payload !== null 
-        ? preset.payload as Record<string, unknown>
-        : {};
+      // Pick random valid preset
+      const randomIndex = Math.floor(Math.random() * validPresets.length);
+      const preset = validPresets[randomIndex];
 
+      console.log(`Using valid fallback preset: ${preset.topic}`);
+
+      const payload = preset.payload as Record<string, unknown>;
+
+      setProgress(100);
+      
       return {
         success: true,
         data: {
@@ -133,8 +249,11 @@ export function useAIGenerationWithFallback() {
       console.error('Fallback error:', err);
       return { 
         success: false, 
-        error: 'Generation failed and no fallback available. Please try again.' 
+        error: 'Generation failed. Please try again later.' 
       };
+    } finally {
+      setIsGenerating(false);
+      setProgress(0);
     }
   };
 

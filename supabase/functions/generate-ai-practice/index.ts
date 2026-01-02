@@ -2189,13 +2189,31 @@ serve(async (req) => {
       try {
         const jsonStr = extractJsonFromResponse(result);
         parsed = JSON.parse(jsonStr);
+        
+        // Validate required fields
+        if (!parsed.passage || !parsed.passage.content) {
+          throw new Error('Missing passage content in AI response');
+        }
+        if (!Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+          throw new Error('Missing or empty questions array in AI response');
+        }
+        // Validate each question has required fields
+        for (const q of parsed.questions) {
+          if (!q.correct_answer) {
+            throw new Error(`Question ${q.question_number || '?'} missing correct_answer`);
+          }
+        }
       } catch (e) {
-        console.error("Failed to parse Gemini response:", e);
+        console.error("Failed to parse/validate Gemini response:", e);
         // Refund credits on parse failure
         if (creditsReserved) {
           await refundCredits(serviceClient, user.id, currentOperationType);
         }
-        return new Response(JSON.stringify({ error: 'Failed to parse generated content.' }), {
+        return new Response(JSON.stringify({ 
+          error: 'AI returned invalid content. Please try again.',
+          errorType: 'PARSE_ERROR',
+          details: e instanceof Error ? e.message : String(e)
+        }), {
           status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -2312,13 +2330,34 @@ serve(async (req) => {
       try {
         const jsonStr = extractJsonFromResponse(result);
         parsed = JSON.parse(jsonStr);
+        
+        // Validate required fields
+        if (!parsed.dialogue || typeof parsed.dialogue !== 'string' || parsed.dialogue.trim().length < 50) {
+          throw new Error('Missing or too short dialogue in AI response');
+        }
+        if (!Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+          throw new Error('Missing or empty questions array in AI response');
+        }
+        if (!parsed.instruction || typeof parsed.instruction !== 'string') {
+          throw new Error('Missing instruction in AI response');
+        }
+        // Validate each question has required fields
+        for (const q of parsed.questions) {
+          if (!q.correct_answer) {
+            throw new Error(`Question ${q.question_number || '?'} missing correct_answer`);
+          }
+        }
       } catch (e) {
-        console.error("Failed to parse listening response:", e);
+        console.error("Failed to parse/validate listening response:", e);
         // Refund credits on parse failure
         if (creditsReserved) {
           await refundCredits(serviceClient, user.id, currentOperationType);
         }
-        return new Response(JSON.stringify({ error: 'Failed to parse generated content.' }), {
+        return new Response(JSON.stringify({ 
+          error: 'AI returned invalid content. Please try again.',
+          errorType: 'PARSE_ERROR',
+          details: e instanceof Error ? e.message : String(e)
+        }), {
           status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });

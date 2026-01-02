@@ -214,10 +214,13 @@ export default function AIPracticeListeningTest() {
 
     // Convert AI questions to expected format
     if (loadedTest.questionGroups && loadedTest.questionGroups.length > 0) {
-      const normalizeType = (raw: unknown, fallback?: string) => {
+      // Normalize question type - DO NOT use fallback, invalid types should be rejected upstream
+      const normalizeType = (raw: unknown) => {
         const t = String(raw ?? '').trim();
-        if (!t && fallback) return fallback;
-        if (!t) return 'FILL_IN_BLANK'; // Default fallback
+        if (!t) {
+          console.error('Missing question_type in AI payload - test is malformed');
+          return null; // Return null to indicate invalid
+        }
         const upper = t.toUpperCase();
         // Listening renderer expects MULTIPLE_CHOICE_SINGLE / MULTIPLE_CHOICE_MULTIPLE
         if (upper === 'MULTIPLE_CHOICE') return 'MULTIPLE_CHOICE_SINGLE';
@@ -234,6 +237,12 @@ export default function AIPracticeListeningTest() {
 
       loadedTest.questionGroups.forEach((group) => {
         const groupType = normalizeType(group.question_type);
+        
+        // Skip groups with invalid/missing question_type
+        if (!groupType) {
+          console.error('Skipping question group with missing question_type:', group.id);
+          return;
+        }
 
         let groupOptions: any = group.options;
         // Align with ListeningQuestions expectations (group.options.options + option_format)
@@ -253,7 +262,7 @@ export default function AIPracticeListeningTest() {
         }
 
         const groupQuestions: Question[] = group.questions.map((q) => {
-          const qt = normalizeType(q.question_type || groupType);
+          const qt = normalizeType(q.question_type) || groupType;
           return {
             id: q.id,
             question_number: q.question_number,
