@@ -237,6 +237,9 @@ export interface GeneratedTest {
   writingTask?: GeneratedWritingTask;
   // Speaking specific
   speakingParts?: GeneratedSpeakingPart[];
+  speakingAudioUrls?: Record<string, string>; // Pre-generated TTS audio URLs for speaking tests (from presets)
+  isPreset?: boolean; // Whether this test is from a preset
+  presetId?: string; // The preset ID if applicable
 }
 
 // Practice result

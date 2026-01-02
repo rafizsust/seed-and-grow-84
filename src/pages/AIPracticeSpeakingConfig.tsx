@@ -279,6 +279,9 @@ export default function AIPracticeSpeakingConfig() {
         topic: data.topic || topicPreference || 'Random Topic',
         timeMinutes: partType === 'FULL_TEST' ? 14 : partType === 'PART_2' ? 4 : 5,
         speakingParts: data.speakingParts,
+        speakingAudioUrls: data.audioUrls, // Pre-generated TTS audio URLs from presets
+        isPreset: data.isPreset,
+        presetId: data.presetId,
         totalQuestions: data.speakingParts?.reduce((acc: number, p: any) => acc + (p.questions?.length || 0), 0) || 0,
         generatedAt: new Date().toISOString(),
       };
