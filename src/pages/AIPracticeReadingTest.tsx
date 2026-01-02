@@ -61,6 +61,7 @@ interface QuestionGroup {
   options: any;
   start_question: number;
   end_question: number;
+  instruction?: string | null;
 }
 
 export default function AIPracticeReadingTest() {
@@ -121,12 +122,16 @@ export default function AIPracticeReadingTest() {
 
     // Convert AI questions to expected format
     if (loadedTest.questionGroups && loadedTest.questionGroups.length > 0) {
-      const normalizeType = (raw: unknown) => {
+      const normalizeType = (raw: unknown, fallback?: string) => {
         const t = String(raw ?? '').trim();
-        if (!t) return '';
+        if (!t && fallback) return fallback;
+        if (!t) return 'FILL_IN_BLANK'; // Default fallback to prevent "undefined" in display
         const upper = t.toUpperCase();
         // Reading renderer expects MULTIPLE_CHOICE for single-select
         if (upper === 'MULTIPLE_CHOICE_SINGLE') return 'MULTIPLE_CHOICE';
+        // Normalize British spelling and variants
+        if (upper === 'MAP_LABELLING') return 'MAP_LABELING';
+        if (upper === 'SUMMARY_WORD_BANK') return 'SUMMARY_WORD_BANK';
         return upper;
       };
 
@@ -142,6 +147,7 @@ export default function AIPracticeReadingTest() {
           options: group.options,
           start_question: group.start_question,
           end_question: group.end_question,
+          instruction: group.instruction || null,
         });
 
         group.questions.forEach((q) => {

@@ -214,9 +214,10 @@ export default function AIPracticeListeningTest() {
 
     // Convert AI questions to expected format
     if (loadedTest.questionGroups && loadedTest.questionGroups.length > 0) {
-      const normalizeType = (raw: unknown) => {
+      const normalizeType = (raw: unknown, fallback?: string) => {
         const t = String(raw ?? '').trim();
-        if (!t) return '';
+        if (!t && fallback) return fallback;
+        if (!t) return 'FILL_IN_BLANK'; // Default fallback
         const upper = t.toUpperCase();
         // Listening renderer expects MULTIPLE_CHOICE_SINGLE / MULTIPLE_CHOICE_MULTIPLE
         if (upper === 'MULTIPLE_CHOICE') return 'MULTIPLE_CHOICE_SINGLE';
@@ -224,6 +225,7 @@ export default function AIPracticeListeningTest() {
         if (upper === 'DRAG_AND_DROP') return 'DRAG_AND_DROP_OPTIONS';
         // British spelling / legacy naming
         if (upper === 'MAP_LABELLING') return 'MAP_LABELING';
+        if (upper === 'SUMMARY_WORD_BANK') return 'SUMMARY_COMPLETION';
         return upper;
       };
 

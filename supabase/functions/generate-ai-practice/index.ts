@@ -704,12 +704,16 @@ function getLastTTSError(): string {
   return lastTTSError || 'Audio generation failed. Please try again.';
 }
 
-// Generate TTS audio using Gemini with retry logic and configurable voices
+// Generate TTS audio using Gemini with retry logic, configurable voices, and DB key rotation
 async function generateAudio(
   apiKey: string, 
   script: string, 
   speakerConfig?: SpeakerConfigInput,
-  maxRetries = 3
+  maxRetries = 3,
+  options?: {
+    dbKeys?: ApiKeyRecord[];
+    serviceClient?: any;
+  }
 ): Promise<{ audioBase64: string; sampleRate: number } | null> {
   lastTTSError = null;
   
@@ -751,12 +755,26 @@ ${script}`;
     };
   }
 
+  // DB key rotation support for TTS
+  const dbKeys = options?.dbKeys || [];
+  const serviceClient = options?.serviceClient;
+  let currentKeyIndex = 0;
+  let currentApiKey = apiKey;
+  let currentKeyRecord: ApiKeyRecord | null = null;
+  
+  // If we have DB keys, use them for rotation
+  if (dbKeys.length > 0) {
+    currentKeyRecord = dbKeys[0];
+    currentApiKey = currentKeyRecord.key_value;
+    console.log(`TTS using DB-managed key 1/${dbKeys.length}`);
+  }
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       console.log(`Generating TTS audio (attempt ${attempt}/${maxRetries}) with voices: ${speaker1Voice}${useTwoSpeakers ? `, ${speaker2Voice}` : ' (monologue)'}...`);
       
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${currentApiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -780,10 +798,29 @@ ${script}`;
           const errorMessage = errorData?.error?.message || '';
           const errorCode = errorData?.error?.code || response.status;
           
-          if (response.status === 429 || errorCode === 429) {
-            lastTTSError = 'API quota exceeded. Your Gemini API has reached its rate limit for audio generation. Please wait a few minutes and try again, or upgrade your Google AI Studio plan.';
-          } else if (response.status === 403) {
-            lastTTSError = 'API access denied for audio generation. Please verify your Gemini API key has TTS permissions enabled.';
+          // Check if we should rotate to next key (429 or 403)
+          if (response.status === 429 || response.status === 403 || errorCode === 429) {
+            // Try next DB key if available
+            if (dbKeys.length > 0 && currentKeyIndex < dbKeys.length - 1) {
+              console.log(`TTS key ${currentKeyIndex + 1} quota/permission issue, rotating to next key...`);
+              
+              // Increment error count for this key
+              if (serviceClient && currentKeyRecord) {
+                await incrementKeyErrorCount(serviceClient, currentKeyRecord.id, response.status === 403);
+              }
+              
+              currentKeyIndex++;
+              currentKeyRecord = dbKeys[currentKeyIndex];
+              currentApiKey = currentKeyRecord.key_value;
+              console.log(`TTS switched to DB key ${currentKeyIndex + 1}/${dbKeys.length}`);
+              continue; // Retry with new key (don't count as retry)
+            }
+            
+            if (response.status === 429 || errorCode === 429) {
+              lastTTSError = 'All API keys have reached their rate limit for audio generation. Please wait a few minutes and try again.';
+            } else {
+              lastTTSError = 'API access denied for audio generation. Please verify your Gemini API key has TTS permissions enabled.';
+            }
           } else if (response.status === 400) {
             lastTTSError = `Audio generation request was rejected: ${errorMessage.slice(0, 100)}. Please try again.`;
           } else {
@@ -2174,6 +2211,34 @@ serve(async (req) => {
         groupOptions = { options: parsed.options };
       } else if (questionType.includes('MULTIPLE_CHOICE') && parsed.questions?.[0]?.options) {
         groupOptions = { options: parsed.questions[0].options };
+      } else if ((questionType === 'SUMMARY_COMPLETION' || questionType === 'SUMMARY_WORD_BANK') && (parsed.summary_text || parsed.word_bank)) {
+        // Summary completion needs summary_text and word_bank in options for renderer
+        groupOptions = { 
+          summary_text: parsed.summary_text || '',
+          word_bank: parsed.word_bank || [],
+        };
+      } else if (questionType === 'MATCHING_SENTENCE_ENDINGS' && (parsed.sentence_endings || parsed.sentence_beginnings)) {
+        // Matching sentence endings needs sentence_endings array for drag/drop
+        groupOptions = { 
+          sentence_beginnings: parsed.sentence_beginnings || [],
+          sentence_endings: parsed.sentence_endings || [],
+        };
+      } else if (questionType === 'TABLE_COMPLETION' && parsed.table_data) {
+        groupOptions = { table_data: parsed.table_data };
+      } else if (questionType === 'FLOWCHART_COMPLETION' && (parsed.flowchart_title || parsed.flowchart_steps)) {
+        groupOptions = { 
+          flowchart_title: parsed.flowchart_title || '',
+          flowchart_steps: parsed.flowchart_steps || [],
+        };
+      } else if (questionType === 'MAP_LABELING' && parsed.map_labels) {
+        groupOptions = {
+          map_description: parsed.map_description || '',
+          map_type: parsed.map_type || 'floor_plan',
+          map_labels: parsed.map_labels || [],
+          landmarks: parsed.landmarks || [],
+        };
+      } else if (questionType === 'NOTE_COMPLETION' && parsed.note_sections) {
+        groupOptions = { note_sections: parsed.note_sections };
       }
 
       const questions = (parsed.questions || []).map((q: any, i: number) => ({
@@ -2261,7 +2326,7 @@ serve(async (req) => {
 
       // Generate TTS audio
       const useTwoSpeakers = listeningConfig?.speakerConfig?.useTwoSpeakers !== false;
-      const audio = await generateAudio(geminiApiKey, parsed.dialogue, listeningConfig?.speakerConfig);
+      const audio = await generateAudio(geminiApiKey, parsed.dialogue, listeningConfig?.speakerConfig, 3, { dbKeys: dbApiKeys, serviceClient });
       
       await updateQuotaTracking(serviceClient, user.id, totalTokensUsed);
 
