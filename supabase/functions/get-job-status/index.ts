@@ -50,7 +50,19 @@ serve(async (req) => {
     }
 
     const url = new URL(req.url);
-    const jobId = url.searchParams.get("jobId");
+    let jobId = url.searchParams.get("jobId");
+
+    // Support POST body too (supabase.functions.invoke uses POST)
+    if (!jobId && req.method !== "GET") {
+      try {
+        const body = await req.json();
+        if (body && typeof body.jobId === "string" && body.jobId.trim()) {
+          jobId = body.jobId.trim();
+        }
+      } catch {
+        // ignore missing/invalid JSON body
+      }
+    }
 
     if (jobId) {
       // Get single job status

@@ -139,6 +139,26 @@ async function withRetry<T>(
   throw lastError || new Error("All retries failed");
 }
 
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -290,17 +310,35 @@ async function processGenerationJob(
 
   await supabase
     .from("bulk_generation_jobs")
-    .update({ status: "processing", started_at: new Date().toISOString() })
+    .update({
+      status: "processing",
+      started_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", jobId);
 
   let successCount = 0;
   let failureCount = 0;
   const errorLog: Array<{ index: number; error: string }> = [];
+  let cancelled = false;
 
   // If mixed question type, rotate through available types
   const questionTypes = getQuestionTypesForModule(module, questionType);
 
   for (let i = 0; i < quantity; i++) {
+    // Allow admin to cancel the job
+    const { data: jobRow } = await supabase
+      .from("bulk_generation_jobs")
+      .select("status")
+      .eq("id", jobId)
+      .single();
+
+    if (jobRow?.status === "cancelled") {
+      cancelled = true;
+      console.log(`[Job ${jobId}] Cancelled by admin. Stopping at ${i}/${quantity}.`);
+      break;
+    }
+
     try {
       console.log(`[Job ${jobId}] Processing test ${i + 1}/${quantity}`);
       
@@ -385,10 +423,14 @@ async function processGenerationJob(
       successCount++;
       console.log(`[Job ${jobId}] Successfully created test ${i + 1}`);
 
-      await supabase
-        .from("bulk_generation_jobs")
-        .update({ success_count: successCount, failure_count: failureCount })
-        .eq("id", jobId);
+       await supabase
+         .from("bulk_generation_jobs")
+         .update({
+           success_count: successCount,
+           failure_count: failureCount,
+           updated_at: new Date().toISOString(),
+         })
+         .eq("id", jobId);
 
     } catch (error) {
       failureCount++;
@@ -396,14 +438,15 @@ async function processGenerationJob(
       errorLog.push({ index: i, error: errorMessage });
       console.error(`[Job ${jobId}] Failed test ${i + 1}:`, errorMessage);
 
-      await supabase
-        .from("bulk_generation_jobs")
-        .update({ 
-          success_count: successCount, 
-          failure_count: failureCount,
-          error_log: errorLog,
-        })
-        .eq("id", jobId);
+       await supabase
+         .from("bulk_generation_jobs")
+         .update({
+           success_count: successCount,
+           failure_count: failureCount,
+           error_log: errorLog,
+           updated_at: new Date().toISOString(),
+         })
+         .eq("id", jobId);
     }
 
     // Delay between generations to avoid rate limiting
@@ -413,11 +456,12 @@ async function processGenerationJob(
   await supabase
     .from("bulk_generation_jobs")
     .update({
-      status: failureCount === quantity ? "failed" : "completed",
+      status: cancelled ? "cancelled" : failureCount === quantity ? "failed" : "completed",
       success_count: successCount,
       failure_count: failureCount,
       error_log: errorLog,
       completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     })
     .eq("id", jobId);
 
@@ -473,23 +517,28 @@ async function generateContent(
 
   const prompt = getPromptForModule(module, topic, difficulty, questionType, monologue);
 
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${LOVABLE_API_KEY}`,
-      "Content-Type": "application/json",
+  const response = await fetchWithTimeout(
+    "https://ai.gateway.lovable.dev/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are an expert IELTS test creator. Generate high-quality, authentic exam content. Always respond with valid JSON only, no markdown code blocks.",
+          },
+          { role: "user", content: prompt },
+        ],
+      }),
     },
-    body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert IELTS test creator. Generate high-quality, authentic exam content. Always respond with valid JSON only, no markdown code blocks.",
-        },
-        { role: "user", content: prompt },
-      ],
-    }),
-  });
+    90_000
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -850,7 +899,7 @@ async function generateGeminiTtsDirect(
     if (!keyRecord) continue;
     
     try {
-      const resp = await fetch(
+      const resp = await fetchWithTimeout(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${keyRecord.key_value}`,
         {
           method: "POST",
@@ -866,7 +915,8 @@ async function generateGeminiTtsDirect(
               },
             },
           }),
-        }
+        },
+        90_000
       );
 
       if (!resp.ok) {

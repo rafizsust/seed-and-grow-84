@@ -183,6 +183,7 @@ export default function TestFactoryAdmin() {
   const [deleteTestId, setDeleteTestId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [retryingTestId, setRetryingTestId] = useState<string | null>(null);
+  const [cancelingJobId, setCancelingJobId] = useState<string | null>(null);
 
   // Filtered jobs
   const filteredJobs = useMemo(() => {
@@ -217,61 +218,37 @@ export default function TestFactoryAdmin() {
     setMonologue(false);
   }, [module]);
 
-  // Fetch jobs on mount and set up realtime subscription
+  // Fetch jobs on mount (polling to guarantee near real-time updates)
   useEffect(() => {
     if (!isAdmin) return;
 
     fetchJobs();
-
-    const channel = supabase
-      .channel("bulk-generation-jobs")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "bulk_generation_jobs",
-        },
-        (payload) => {
-          console.log("Job update:", payload);
-          fetchJobs();
-          if (selectedJob && payload.new && (payload.new as GenerationJob).id === selectedJob.id) {
-            setSelectedJob(payload.new as GenerationJob);
-          }
-        }
-      )
-      .subscribe();
+    const intervalId = window.setInterval(fetchJobs, 5000);
 
     return () => {
-      supabase.removeChannel(channel);
+      window.clearInterval(intervalId);
     };
-  }, [isAdmin, selectedJob?.id]);
+  }, [isAdmin]);
 
-  // Fetch job details when selected
+  // Fetch job details when selected (polling)
   useEffect(() => {
-    if (selectedJob) {
-      fetchJobDetails(selectedJob.id);
-    }
+    if (!selectedJob) return;
+
+    fetchJobDetails(selectedJob.id);
+    const intervalId = window.setInterval(() => fetchJobDetails(selectedJob.id), 5000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [selectedJob?.id]);
 
   const fetchJobs = async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      const { data, error } = await supabase.functions.invoke("get-job-status");
+      if (error) throw error;
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-job-status`,
-        {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      const data = await response.json();
-      if (data.jobs) {
-        setJobs(data.jobs);
+      if ((data as any)?.jobs) {
+        setJobs((data as any).jobs);
       }
     } catch (error) {
       console.error("Failed to fetch jobs:", error);
@@ -282,22 +259,13 @@ export default function TestFactoryAdmin() {
 
   const fetchJobDetails = async (jobId: string) => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      const { data, error } = await supabase.functions.invoke("get-job-status", {
+        body: { jobId },
+      });
+      if (error) throw error;
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-job-status?jobId=${jobId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      const data = await response.json();
-      if (data.tests) {
-        setJobTests(data.tests);
+      if ((data as any)?.tests) {
+        setJobTests((data as any).tests);
       }
     } catch (error) {
       console.error("Failed to fetch job details:", error);
@@ -312,12 +280,6 @@ export default function TestFactoryAdmin() {
 
     setIsGenerating(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        toast.error("Not authenticated");
-        return;
-      }
-
       const payload: Record<string, unknown> = {
         module,
         topic,
@@ -331,24 +293,17 @@ export default function TestFactoryAdmin() {
         payload.monologue = monologue;
       }
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/bulk-generate-tests`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        }
-      );
+      const { data, error } = await supabase.functions.invoke("bulk-generate-tests", {
+        body: payload,
+      });
 
-      const data = await response.json();
-      if (data.success) {
-        toast.success(data.message);
+      if (error) throw error;
+
+      if ((data as any)?.success) {
+        toast.success((data as any).message);
         fetchJobs();
       } else {
-        toast.error(data.error || "Failed to start generation");
+        toast.error((data as any)?.error || "Failed to start generation");
       }
     } catch (error) {
       console.error("Generation error:", error);
@@ -360,29 +315,18 @@ export default function TestFactoryAdmin() {
 
   const publishTests = async (testIds: string[], publish: boolean) => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      const { data, error } = await supabase.functions.invoke("publish-generated-tests", {
+        body: { testIds, publish },
+      });
+      if (error) throw error;
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/publish-generated-tests`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ testIds, publish }),
-        }
-      );
-
-      const data = await response.json();
-      if (data.success) {
-        toast.success(data.message);
+      if ((data as any)?.success) {
+        toast.success((data as any).message);
         if (selectedJob) {
           fetchJobDetails(selectedJob.id);
         }
       } else {
-        toast.error(data.error || "Failed to update tests");
+        toast.error((data as any)?.error || "Failed to update tests");
       }
     } catch (error) {
       toast.error("Failed to update tests");
@@ -414,45 +358,30 @@ export default function TestFactoryAdmin() {
 
   const retryTest = async (test: GeneratedTest) => {
     if (!selectedJob) return;
-    
+
     setRetryingTestId(test.id);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      const { data, error } = await supabase.functions.invoke("bulk-generate-tests", {
+        body: {
+          module: selectedJob.module,
+          topic: selectedJob.topic,
+          difficulty: selectedJob.difficulty,
+          quantity: 1,
+          questionType: test.question_type || selectedJob.question_type,
+          monologue: selectedJob.monologue,
+        },
+      });
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/bulk-generate-tests`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            module: selectedJob.module,
-            topic: selectedJob.topic,
-            difficulty: selectedJob.difficulty,
-            quantity: 1,
-            questionType: test.question_type || selectedJob.question_type,
-            monologue: selectedJob.monologue,
-          }),
-        }
-      );
+      if (error) throw error;
 
-      const data = await response.json();
-      if (data.success) {
+      if ((data as any)?.success) {
         toast.success("Retry started - new test will appear shortly");
         // Delete the failed test
-        await supabase
-          .from("generated_test_audio")
-          .delete()
-          .eq("id", test.id);
-        
-        if (selectedJob) {
-          setTimeout(() => fetchJobDetails(selectedJob.id), 2000);
-        }
+        await supabase.from("generated_test_audio").delete().eq("id", test.id);
+
+        setTimeout(() => fetchJobDetails(selectedJob.id), 2000);
       } else {
-        toast.error(data.error || "Failed to retry");
+        toast.error((data as any)?.error || "Failed to retry");
       }
     } catch (error) {
       console.error("Retry error:", error);
@@ -462,16 +391,57 @@ export default function TestFactoryAdmin() {
     }
   };
 
+  const cancelJob = async (jobId: string) => {
+    setCancelingJobId(jobId);
+    try {
+      const { error } = await supabase
+        .from("bulk_generation_jobs")
+        .update({ status: "cancelled" })
+        .eq("id", jobId);
+
+      if (error) throw error;
+      toast.success("Cancellation requested");
+      fetchJobs();
+
+      if (selectedJob?.id === jobId) {
+        setSelectedJob((prev) => (prev ? { ...prev, status: "cancelled" } : prev));
+      }
+    } catch (error) {
+      console.error("Cancel job error:", error);
+      toast.error("Failed to cancel job");
+    } finally {
+      setCancelingJobId(null);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "pending":
-        return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Pending</Badge>;
+        return (
+          <Badge variant="secondary">
+            <Clock className="h-3 w-3 mr-1" />Pending
+          </Badge>
+        );
       case "processing":
-        return <Badge variant="default" className="bg-blue-500"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Processing</Badge>;
+        return (
+          <Badge variant="default" className="bg-blue-500">
+            <Loader2 className="h-3 w-3 mr-1 animate-spin" />Processing
+          </Badge>
+        );
       case "completed":
-        return <Badge variant="default" className="bg-green-500"><CheckCircle className="h-3 w-3 mr-1" />Completed</Badge>;
+        return (
+          <Badge variant="default" className="bg-green-500">
+            <CheckCircle className="h-3 w-3 mr-1" />Completed
+          </Badge>
+        );
       case "failed":
-        return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Failed</Badge>;
+        return (
+          <Badge variant="destructive">
+            <XCircle className="h-3 w-3 mr-1" />Failed
+          </Badge>
+        );
+      case "cancelled":
+        return <Badge variant="outline">Cancelled</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
@@ -743,6 +713,7 @@ export default function TestFactoryAdmin() {
                     <SelectItem value="processing">Processing</SelectItem>
                     <SelectItem value="completed">Completed</SelectItem>
                     <SelectItem value="failed">Failed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
                   </SelectContent>
                 </Select>
 
@@ -805,7 +776,27 @@ export default function TestFactoryAdmin() {
                                 <Badge variant="outline" className="text-xs">Monologue</Badge>
                               )}
                             </div>
-                            {getStatusBadge(job.status)}
+                            <div className="flex items-center gap-2">
+                              {getStatusBadge(job.status)}
+                              {(job.status === "processing" || job.status === "pending") && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    cancelJob(job.id);
+                                  }}
+                                  disabled={cancelingJobId === job.id}
+                                  title="Cancel job"
+                                >
+                                  {cancelingJobId === job.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <X className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              )}
+                            </div>
                           </div>
                           
                           <div className="flex items-center justify-between text-sm text-muted-foreground mb-2">
