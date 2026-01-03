@@ -19,6 +19,7 @@ import { useToast } from '@/hooks/use-toast';
 import { describeApiError } from '@/lib/apiErrors';
 import { useAuth } from '@/hooks/useAuth';
 import { useTopicCompletions } from '@/hooks/useTopicCompletions';
+import { useSmartTopicCycle } from '@/hooks/useSmartTopicCycle';
 import { supabase } from '@/integrations/supabase/client';
 import { playCompletionSound, playErrorSound } from '@/lib/sounds';
 import { 
@@ -177,11 +178,36 @@ export default function AIPractice() {
     }
   }, [writingTaskType]);
 
-  // Topic completion tracking
+  // Topic completion tracking (legacy hooks for displaying completion counts)
   const readingCompletions = useTopicCompletions('reading');
   const listeningCompletions = useTopicCompletions('listening');
   const writingCompletions = useTopicCompletions('writing');
   const speakingCompletions = useTopicCompletions('speaking');
+
+  // Smart-Cycle topic rotation for each module
+  // These hooks implement the balanced round-robin algorithm
+  const readingSmartCycle = useSmartTopicCycle('reading');
+  const listeningSmartCycle = useSmartTopicCycle('listening');
+  // Writing needs subtype for correct topic list
+  const writingSubtype = writingTaskType === 'TASK_1' ? 'TASK_1' : 'TASK_2';
+  const writingSmartCycle = useSmartTopicCycle('writing', writingSubtype);
+  // Speaking needs subtype for correct topic list  
+  const speakingSubtype = speakingPartType === 'PART_1' ? 'PART_1' 
+    : speakingPartType === 'PART_2' ? 'PART_2' 
+    : speakingPartType === 'PART_3' ? 'PART_3' 
+    : 'FULL_TEST';
+  const speakingSmartCycle = useSmartTopicCycle('speaking', speakingSubtype);
+
+  // Get the current smart cycle hook based on active module
+  const currentSmartCycle = useMemo(() => {
+    switch (activeModule) {
+      case 'reading': return readingSmartCycle;
+      case 'listening': return listeningSmartCycle;
+      case 'writing': return writingSmartCycle;
+      case 'speaking': return speakingSmartCycle;
+      default: return readingSmartCycle;
+    }
+  }, [activeModule, readingSmartCycle, listeningSmartCycle, writingSmartCycle, speakingSmartCycle]);
 
   // Get topics based on current module/subtype
   const currentTopics = useMemo(() => {
@@ -398,6 +424,9 @@ export default function AIPractice() {
       // Use writing time for writing module
       const finalTimeMinutes = activeModule === 'writing' ? writingTimeMinutes : timeMinutes;
 
+      // Smart-Cycle: If no manual topic selected, use the next topic from the round-robin algorithm
+      const effectiveTopic = topicPreference.trim() || currentSmartCycle.nextTopic || undefined;
+
       // Use native fetch with extended timeout for long-running AI generation (listening TTS can take 3+ min)
       const controller = new AbortController();
       setAbortController(controller); // Store for cancel button
@@ -423,7 +452,7 @@ export default function AIPractice() {
               module: activeModule,
               questionType: currentQuestionType,
               difficulty,
-              topicPreference: topicPreference.trim() || undefined,
+              topicPreference: effectiveTopic,
               questionCount,
               timeMinutes: finalTimeMinutes,
               readingConfig,
@@ -1198,16 +1227,26 @@ export default function AIPractice() {
                     Topic Preference
                   </Label>
                   
-                  {/* Random option */}
+                  {/* Smart Cycle option - shows next topic from round-robin */}
                   <SelectableCard
                     isSelected={!topicPreference}
                     onClick={() => setTopicPreference('')}
                     className="max-w-md"
                   >
-                    <div className="flex items-center gap-2 pr-6">
-                      <Sparkles className="w-4 h-4 text-primary" />
-                      <span className="font-medium">Random Topic</span>
-                      <span className="text-xs text-muted-foreground">(recommended)</span>
+                    <div className="flex flex-col gap-1 pr-6">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-primary" />
+                        <span className="font-medium">Smart Cycle</span>
+                        <span className="text-xs text-muted-foreground">(recommended)</span>
+                      </div>
+                      {currentSmartCycle.nextTopic && (
+                        <div className="text-xs text-muted-foreground ml-6">
+                          Next: <span className="text-foreground font-medium">{currentSmartCycle.nextTopic}</span>
+                          {currentSmartCycle.cycleCount > 0 && (
+                            <span className="ml-1">(Cycle {currentSmartCycle.cycleCount + 1})</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </SelectableCard>
 

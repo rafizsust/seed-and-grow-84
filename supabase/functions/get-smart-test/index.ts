@@ -36,6 +36,49 @@ serve(async (req) => {
       });
     }
 
+    // If no topic is specified and user is logged in, use Smart-Cycle algorithm to pick topic
+    let effectiveTopic = topic;
+    
+    if (!effectiveTopic && userId) {
+      // Get all distinct topics from published tests for this module
+      const { data: topicData } = await supabase
+        .from("generated_test_audio")
+        .select("topic")
+        .eq("module", module)
+        .eq("is_published", true)
+        .eq("status", "ready");
+
+      if (topicData && topicData.length > 0) {
+        // Get unique topics, sorted for consistent ordering
+        const availableTopics = [...new Set(topicData.map(t => t.topic))].sort();
+        
+        // Get user's completion counts for these topics
+        const { data: completionData } = await supabase
+          .from("ai_practice_topic_completions")
+          .select("topic, completed_count")
+          .eq("user_id", userId)
+          .eq("module", module);
+
+        const completions: Record<string, number> = {};
+        completionData?.forEach((row: { topic: string; completed_count: number }) => {
+          completions[row.topic] = row.completed_count;
+        });
+
+        // Calculate cycle count (minimum completions across all available topics)
+        const counts = availableTopics.map(t => completions[t] || 0);
+        const cycleCount = Math.min(...counts);
+
+        // Find next topic where usage == cycle_count (Smart-Cycle algorithm)
+        for (const t of availableTopics) {
+          const usageCount = completions[t] || 0;
+          if (usageCount === cycleCount) {
+            effectiveTopic = t;
+            break;
+          }
+        }
+      }
+    }
+
     // Build query for smart test selection
     let query = supabase
       .from("generated_test_audio")
@@ -44,9 +87,9 @@ serve(async (req) => {
       .eq("is_published", true)
       .eq("status", "ready");
 
-    // Filter by topic if provided
-    if (topic) {
-      query = query.eq("topic", topic);
+    // Filter by topic if provided (or determined by Smart-Cycle)
+    if (effectiveTopic) {
+      query = query.eq("topic", effectiveTopic);
     }
 
     // Get all matching tests
