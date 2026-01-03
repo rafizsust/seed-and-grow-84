@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 
 interface WordBankItem {
@@ -29,9 +29,14 @@ export function SummaryWordBank({
   fontSize = 14,
 }: SummaryWordBankProps) {
   const [draggedWord, setDraggedWord] = useState<string | null>(null);
+  const [draggedFromGap, setDraggedFromGap] = useState<number | null>(null);
+  const [isDragOverList, setIsDragOverList] = useState(false);
+  const [dragOverGap, setDragOverGap] = useState<number | null>(null);
+  // Click-to-select state
+  const [selectedWord, setSelectedWord] = useState<string | null>(null);
 
   // Parse content to identify gaps
-  const parseContent = () => {
+  const parseContent = useCallback(() => {
     const parts: Array<{ type: 'text' | 'gap'; value: string; questionNumber?: number }> = [];
     const regex = /\{\{(\d+)\}\}/g;
     let lastIndex = 0;
@@ -53,7 +58,7 @@ export function SummaryWordBank({
     }
 
     return parts;
-  };
+  }, [content]);
 
   const normalizeWordBankItem = (item: string | WordBankItem) => {
     if (typeof item === 'string') {
@@ -63,54 +68,109 @@ export function SummaryWordBank({
     return { id: item.id, text: item.text };
   };
 
-  // Look up full word text from stored answer ID
-  const getWordText = (answerId: string): string => {
-    const item = wordBank.find(w => {
-      const normalized = normalizeWordBankItem(w);
-      return normalized.id === answerId;
-    });
-    if (item) {
-      return normalizeWordBankItem(item).text;
-    }
-    return answerId; // fallback to showing the ID if not found
+  // Get word bank item by ID for display
+  const getWordById = (wordId: string): WordBankItem | null => {
+    const item = wordBank.find(w => normalizeWordBankItem(w).id === wordId);
+    return item ? normalizeWordBankItem(item) : null;
   };
 
-  const handleDragStart = (item: string | WordBankItem) => {
-    const wb = normalizeWordBankItem(item);
-    setDraggedWord(wb.id);
+  const handleDragStart = (wordId: string, fromGap?: number) => {
+    setDraggedWord(wordId);
+    setDraggedFromGap(fromGap ?? null);
+    setSelectedWord(null); // Clear click selection on drag
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragEnd = () => {
+    setDraggedWord(null);
+    setDraggedFromGap(null);
+    setIsDragOverList(false);
+    setDragOverGap(null);
+  };
+
+  const handleGapDragOver = (e: React.DragEvent, questionNumber: number) => {
     e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverGap(questionNumber);
+  };
+
+  const handleGapDragLeave = () => {
+    setDragOverGap(null);
   };
 
   const handleDrop = (questionNumber: number) => {
     if (draggedWord) {
+      // If dragging from another gap, clear that gap first
+      if (draggedFromGap !== null && draggedFromGap !== questionNumber) {
+        onAnswerChange(draggedFromGap, '');
+      }
       onAnswerChange(questionNumber, draggedWord);
-      // Focus the question in navigation after drop
       onQuestionFocus?.(questionNumber);
-      setDraggedWord(null);
     }
+    setDraggedWord(null);
+    setDraggedFromGap(null);
+    setDragOverGap(null);
+  };
+
+  // Handle dropping word back to the list (remove from gap)
+  const handleListDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setIsDragOverList(true);
+  };
+
+  const handleListDragLeave = () => {
+    setIsDragOverList(false);
+  };
+
+  const handleListDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOverList(false);
+    // If dragged from a gap, remove it
+    if (draggedFromGap !== null) {
+      onAnswerChange(draggedFromGap, '');
+    }
+    setDraggedWord(null);
+    setDraggedFromGap(null);
   };
 
   const handleClear = (questionNumber: number) => {
     onAnswerChange(questionNumber, '');
   };
 
-  const handleWordClick = (item: string | WordBankItem) => {
-    const wb = normalizeWordBankItem(item);
-    // Find first empty gap or current question
-    const allGaps = parseContent().filter(p => p.type === 'gap');
-    const firstEmptyGap = allGaps.find(g => !answers[g.questionNumber!]);
-
-    if (currentQuestion && !answers[currentQuestion]) {
-      onAnswerChange(currentQuestion, wb.id);
-      onQuestionFocus?.(currentQuestion);
-    } else if (firstEmptyGap) {
-      onAnswerChange(firstEmptyGap.questionNumber!, wb.id);
-      onQuestionFocus?.(firstEmptyGap.questionNumber!);
+  // Handle click selection (like MatchingHeadingsDragDrop)
+  const handleWordClick = (wordId: string) => {
+    if (selectedWord === wordId) {
+      // Deselect if clicking same word
+      setSelectedWord(null);
+    } else {
+      setSelectedWord(wordId);
     }
   };
+
+  // Handle clicking on a gap when a word is selected
+  const handleGapClick = (questionNumber: number, currentAnswer: string) => {
+    if (selectedWord) {
+      // Place selected word in this gap
+      onAnswerChange(questionNumber, selectedWord);
+      onQuestionFocus?.(questionNumber);
+      setSelectedWord(null);
+    } else if (currentAnswer) {
+      // Click to remove
+      handleClear(questionNumber);
+    }
+  };
+
+  // Clear selection when clicking outside
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.summary-word-bank-container')) {
+        setSelectedWord(null);
+      }
+    };
+    document.addEventListener('click', handleOutsideClick);
+    return () => document.removeEventListener('click', handleOutsideClick);
+  }, []);
 
   const parts = parseContent();
 
@@ -127,7 +187,7 @@ export function SummaryWordBank({
     .filter(Boolean);
 
   return (
-    <div className="flex gap-4" style={{ fontSize: `${fontSize}px` }}>
+    <div className="summary-word-bank-container flex gap-4" style={{ fontSize: `${fontSize}px` }}>
       {/* Summary Content */}
       <div className="flex-1">
         {title && (
@@ -145,24 +205,58 @@ export function SummaryWordBank({
             const questionNumber = part.questionNumber!;
             const answer = answers[questionNumber] || '';
             const isActive = currentQuestion === questionNumber;
+            const isDragOver = dragOverGap === questionNumber;
+            const canClickToPlace = !!selectedWord && !answer;
+            const assignedWord = answer ? getWordById(answer) : null;
+            const isDragging = draggedFromGap === questionNumber;
 
+            // Filled state: show draggable word chip
+            if (assignedWord) {
+              return (
+                <span
+                  key={index}
+                  draggable
+                  onDragStart={() => handleDragStart(assignedWord.id, questionNumber)}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={(e) => handleGapDragOver(e, questionNumber)}
+                  onDragLeave={handleGapDragLeave}
+                  onDrop={() => handleDrop(questionNumber)}
+                  onClick={() => handleClear(questionNumber)}
+                  title="Click to remove, or drag to move"
+                  className={cn(
+                    "inline-flex items-center justify-center min-w-24 h-8 mx-1 px-2 border-2 rounded cursor-pointer transition-all align-middle",
+                    "border-primary bg-primary/10 border-solid",
+                    "hover:border-[hsl(var(--ielts-drag-hover))]",
+                    isDragging && "opacity-40 scale-95",
+                    isDragOver && "border-[hsl(var(--ielts-drag-hover))] border-2"
+                  )}
+                >
+                  <span className="font-medium text-sm">{assignedWord.text}</span>
+                </span>
+              );
+            }
+
+            // Empty state: drop zone
             return (
               <span
                 key={index}
-                onDragOver={handleDragOver}
+                onDragOver={(e) => handleGapDragOver(e, questionNumber)}
+                onDragLeave={handleGapDragLeave}
                 onDrop={() => handleDrop(questionNumber)}
-                onClick={() => answer && handleClear(questionNumber)}
+                onClick={() => handleGapClick(questionNumber, answer)}
                 className={cn(
                   "inline-flex items-center justify-center min-w-24 h-8 mx-1 border-2 rounded cursor-pointer transition-all align-middle",
-                  answer
-                    ? "border-primary bg-primary/10 border-solid px-2"
-                    : isActive
-                      ? "border-primary border-dashed bg-primary/5"
-                      : "border-muted-foreground/40 border-dashed hover:border-primary/50"
+                  "border-muted-foreground/40 border-dashed",
+                  isDragOver && "border-[hsl(var(--ielts-drag-hover))] bg-[hsl(var(--ielts-input-focus)/0.15)]",
+                  isActive && !isDragOver && "border-primary border-dashed bg-primary/5",
+                  canClickToPlace && "border-[hsl(var(--ielts-drag-hover))] cursor-pointer hover:bg-[hsl(var(--ielts-input-focus)/0.15)]",
+                  !isDragOver && !isActive && !canClickToPlace && "hover:border-primary/50"
                 )}
               >
-                {answer ? (
-                  <span className="font-medium text-sm">{getWordText(answer)}</span>
+                {isDragOver ? (
+                  <span className="text-[hsl(var(--ielts-input-focus))] text-sm font-medium">Drop here</span>
+                ) : canClickToPlace ? (
+                  <span className="text-[hsl(var(--ielts-input-focus))] text-sm font-medium">Click to place</span>
                 ) : (
                   <span className="text-muted-foreground font-bold text-sm">
                     {questionNumber}
@@ -176,10 +270,26 @@ export function SummaryWordBank({
 
       {/* Word Bank Sidebar */}
       <div className="w-44 flex-shrink-0">
-        <div className="sticky top-4 space-y-1">
+        <div 
+          className={cn(
+            "sticky top-4 space-y-1.5 p-2 transition-colors rounded",
+            isDragOverList && "bg-[hsl(var(--ielts-ghost))]"
+          )}
+          onDragOver={handleListDragOver}
+          onDragLeave={handleListDragLeave}
+          onDrop={handleListDrop}
+        >
+          {selectedWord && (
+            <p className="text-xs text-muted-foreground mb-2">
+              Click on a gap to place the selected word.
+            </p>
+          )}
+
           {wordBank.map((item, index) => {
             const wb = normalizeWordBankItem(item);
             const isUsed = usedWords.includes(wb.id);
+            const isDragging = draggedWord === wb.id;
+            const isSelected = selectedWord === wb.id;
 
             return (
               <div
@@ -189,11 +299,17 @@ export function SummaryWordBank({
                 {!isUsed ? (
                   <div
                     draggable
-                    onDragStart={() => handleDragStart(item)}
-                    onClick={() => handleWordClick(item)}
+                    onDragStart={() => handleDragStart(wb.id)}
+                    onDragEnd={handleDragEnd}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleWordClick(wb.id);
+                    }}
                     className={cn(
                       "px-2 py-1.5 border rounded text-center cursor-pointer transition-all text-sm",
-                      "bg-background hover:border-primary hover:bg-primary/5 active:bg-primary/10"
+                      "bg-background hover:border-primary hover:bg-primary/5 active:bg-primary/10",
+                      isDragging && "opacity-40 scale-95",
+                      isSelected && "border-2 border-[hsl(var(--ielts-drag-hover))] bg-[hsl(var(--ielts-input-focus)/0.1)] shadow-sm"
                     )}
                   >
                     <span>{wb.text}</span>

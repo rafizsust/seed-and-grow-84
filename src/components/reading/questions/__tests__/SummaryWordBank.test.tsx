@@ -29,14 +29,16 @@ describe('SummaryWordBank', () => {
       );
 
       // "artifact" and "ancient" should NOT be ghosted since they're used in a different group
+      // They should be visible and draggable in the word bank
       const artifactWord = screen.getByText('artifact');
       const ancientWord = screen.getByText('ancient');
       
-      // Words should be draggable (not disabled) since they're not used in THIS group
-      expect(artifactWord).not.toHaveClass('line-through');
-      expect(ancientWord).not.toHaveClass('line-through');
-      expect(artifactWord).not.toHaveClass('opacity-40');
-      expect(ancientWord).not.toHaveClass('opacity-40');
+      // Words should be rendered (not replaced by empty placeholders)
+      expect(artifactWord).toBeInTheDocument();
+      expect(ancientWord).toBeInTheDocument();
+      // They should be draggable
+      expect(artifactWord.closest('[draggable]')).toHaveAttribute('draggable', 'true');
+      expect(ancientWord.closest('[draggable]')).toHaveAttribute('draggable', 'true');
     });
 
     it('should ghost words used within THIS question group', () => {
@@ -52,16 +54,15 @@ describe('SummaryWordBank', () => {
         />
       );
 
-      // Find the word bank items (they're in the sidebar, separate from the gap)
-      const wordBankItems = screen.getAllByText('artifact');
+      // When a word is used in this group, the word bank slot should be empty (placeholder)
+      // The word "artifact" should appear in the filled gap, not in the word bank as draggable
+      const artifactElements = screen.getAllByText('artifact');
       
-      // The word in the word bank (not the one in the gap) should be ghosted
-      const wordBankArtifact = wordBankItems.find((el: HTMLElement) => 
-        el.closest('.w-44') // The word bank sidebar
-      );
+      // Only one instance should exist (in the gap), not in the word bank
+      expect(artifactElements.length).toBe(1);
       
-      expect(wordBankArtifact).toHaveClass('line-through');
-      expect(wordBankArtifact).toHaveClass('opacity-40');
+      // The artifact in the gap should be part of a filled drop zone (has border-primary class)
+      expect(artifactElements[0].closest('.border-primary')).toBeInTheDocument();
     });
 
     it('should correctly identify gap question numbers from content', () => {
@@ -81,14 +82,13 @@ describe('SummaryWordBank', () => {
         />
       );
 
-      // "temple" used in question 15 should be ghosted
-      const wordBankItems = screen.getAllByText('temple');
-      const wordBankTemple = wordBankItems.find((el: HTMLElement) => el.closest('.w-44'));
-      expect(wordBankTemple).toHaveClass('opacity-40');
-
-      // "artifact" should NOT be ghosted (not used in questions 15-16)
+      // "temple" used in question 15 should be in the gap, not in the word bank
+      const templeElements = screen.getAllByText('temple');
+      expect(templeElements.length).toBe(1); // Only in the gap, not word bank
+      
+      // "artifact" should still be draggable in the word bank (not used in questions 15-16)
       const artifactWord = screen.getByText('artifact');
-      expect(artifactWord).not.toHaveClass('opacity-40');
+      expect(artifactWord.closest('[draggable]')).toHaveAttribute('draggable', 'true');
     });
   });
 
@@ -118,7 +118,60 @@ describe('SummaryWordBank', () => {
 
       // Should show the answers in the gaps (these appear as filled gaps)
       const artifacts = screen.getAllByText('artifact');
-      expect(artifacts.length).toBeGreaterThan(0);
+      expect(artifacts.length).toBe(1); // Only in gap, not in word bank
+      
+      const temples = screen.getAllByText('temple');
+      expect(temples.length).toBe(1); // Only in gap, not in word bank
+    });
+  });
+
+  describe('word bank item format', () => {
+    it('should handle object format word bank items {id, text}', () => {
+      const objectWordBank = [
+        { id: 'A', text: 'apple' },
+        { id: 'B', text: 'banana' },
+        { id: 'C', text: 'cherry' },
+      ];
+
+      render(
+        <SummaryWordBank
+          content="I like {{1}} and {{2}}."
+          wordBank={objectWordBank}
+          answers={{}}
+          onAnswerChange={vi.fn()}
+        />
+      );
+
+      // Should display only the text, not the letter labels
+      expect(screen.getByText('apple')).toBeInTheDocument();
+      expect(screen.getByText('banana')).toBeInTheDocument();
+      expect(screen.getByText('cherry')).toBeInTheDocument();
+      
+      // Should NOT display letter labels
+      expect(screen.queryByText('A')).not.toBeInTheDocument();
+      expect(screen.queryByText('B')).not.toBeInTheDocument();
+      expect(screen.queryByText('C')).not.toBeInTheDocument();
+    });
+
+    it('should display full word text in drop zone when answered', () => {
+      const objectWordBank = [
+        { id: 'A', text: 'apple' },
+        { id: 'B', text: 'banana' },
+      ];
+
+      render(
+        <SummaryWordBank
+          content="I like {{1}}."
+          wordBank={objectWordBank}
+          answers={{ 1: 'A' }} // Answer stores the ID
+          onAnswerChange={vi.fn()}
+        />
+      );
+
+      // Should display the full text "apple" not the letter "A"
+      expect(screen.getByText('apple')).toBeInTheDocument();
+      // The letter should not be shown anywhere
+      expect(screen.queryByText('A')).not.toBeInTheDocument();
     });
   });
 });
