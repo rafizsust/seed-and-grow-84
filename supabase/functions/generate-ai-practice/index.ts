@@ -1863,7 +1863,17 @@ serve(async (req) => {
       
       // Match question type if specified and not mixed
       if (questionType && questionType !== 'mixed' && questionType !== 'MIXED' && questionType !== 'FULL_TEST') {
-        presetQuery = presetQuery.eq('question_type', questionType);
+        // Normalize question type aliases for matching
+        // MULTIPLE_CHOICE and MULTIPLE_CHOICE_SINGLE are equivalent
+        const normalizedType = questionType.toUpperCase();
+        if (normalizedType === 'MULTIPLE_CHOICE') {
+          // Match both MULTIPLE_CHOICE and MULTIPLE_CHOICE_SINGLE
+          presetQuery = presetQuery.in('question_type', ['MULTIPLE_CHOICE', 'MULTIPLE_CHOICE_SINGLE']);
+        } else if (normalizedType === 'MULTIPLE_CHOICE_SINGLE') {
+          presetQuery = presetQuery.in('question_type', ['MULTIPLE_CHOICE', 'MULTIPLE_CHOICE_SINGLE']);
+        } else {
+          presetQuery = presetQuery.eq('question_type', normalizedType);
+        }
       }
       
       // Optionally match topic (fuzzy - if topic preference provided)

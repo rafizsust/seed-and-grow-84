@@ -56,18 +56,32 @@ export default function GeneratedTestPreview({ open, onOpenChange, test }: Gener
 }
 
 function ReadingPreview({ payload }: { payload: Record<string, unknown> }) {
-  const data = payload as {
-    title?: string;
-    passage?: string;
-    paragraphs?: Array<{ label: string; content: string }>;
-    questions?: Array<{
-      number: number;
-      text: string;
-      type: string;
-      options?: string[];
-      answer: string;
-    }>;
-  };
+  // Support both flat and nested passage structures
+  const rawPassage = payload.passage as any;
+  const passageContent = typeof rawPassage === 'string' 
+    ? rawPassage 
+    : (rawPassage?.content || '');
+  const passageTitle = typeof rawPassage === 'object' 
+    ? rawPassage?.title 
+    : (payload.title as string);
+  
+  const paragraphs = payload.paragraphs as Array<{ label: string; content: string }> | undefined;
+  
+  // Headings for MATCHING_HEADINGS type
+  const headings = payload.headings as Array<string | { id: string; text: string }> | undefined;
+  
+  // Questions - support both field names
+  const questions = (payload.questions || []) as Array<{
+    question_number?: number;
+    number?: number;
+    question_text?: string;
+    text?: string;
+    type?: string;
+    options?: string[];
+    correct_answer?: string;
+    answer?: string;
+    explanation?: string;
+  }>;
 
   return (
     <div className="space-y-6">
@@ -75,42 +89,65 @@ function ReadingPreview({ payload }: { payload: Record<string, unknown> }) {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <FileText className="h-4 w-4" />
-            {data.title || "Reading Passage"}
+            {passageTitle || "Reading Passage"}
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {data.paragraphs ? (
+          {paragraphs && paragraphs.length > 0 ? (
             <div className="space-y-4">
-              {data.paragraphs.map((p, i) => (
+              {paragraphs.map((p, i) => (
                 <div key={i}>
                   <span className="font-bold text-primary">{p.label}</span>
                   <p className="text-sm leading-relaxed mt-1">{p.content}</p>
                 </div>
               ))}
             </div>
-          ) : data.passage ? (
-            <p className="text-sm leading-relaxed whitespace-pre-wrap">{data.passage}</p>
+          ) : passageContent ? (
+            <p className="text-sm leading-relaxed whitespace-pre-wrap">{passageContent}</p>
           ) : (
             <p className="text-muted-foreground">No passage content</p>
           )}
         </CardContent>
       </Card>
 
+      {/* Show headings if available (for MATCHING_HEADINGS type) */}
+      {headings && headings.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ListChecks className="h-4 w-4" />
+              Headings ({headings.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-1">
+              {headings.map((h, i) => (
+                <p key={i} className="text-sm">
+                  {typeof h === 'string' ? h : `${h.id}. ${h.text}`}
+                </p>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ListChecks className="h-4 w-4" />
-            Questions ({data.questions?.length || 0})
+            Questions ({questions.length})
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {data.questions?.map((q, i) => (
+            {questions.map((q, i) => (
               <div key={i} className="border-b pb-3 last:border-0">
                 <div className="flex items-start gap-2">
-                  <Badge variant="outline" className="shrink-0">{q.number || i + 1}</Badge>
+                  <Badge variant="outline" className="shrink-0">
+                    {q.question_number || q.number || i + 1}
+                  </Badge>
                   <div className="flex-1">
-                    <p className="text-sm">{q.text}</p>
+                    <p className="text-sm">{q.question_text || q.text}</p>
                     {q.options && (
                       <div className="mt-2 pl-4 space-y-1">
                         {q.options.map((opt, j) => (
@@ -121,8 +158,13 @@ function ReadingPreview({ payload }: { payload: Record<string, unknown> }) {
                       </div>
                     )}
                     <p className="mt-2 text-xs font-medium text-green-600">
-                      Answer: {q.answer}
+                      Answer: {q.correct_answer || q.answer}
                     </p>
+                    {q.explanation && (
+                      <p className="mt-1 text-xs text-muted-foreground italic">
+                        {q.explanation}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
