@@ -50,6 +50,14 @@ const stripLeadingQuestionNumber = (text: string, questionNumber: number): strin
   return text.replace(regex, '').trim();
 };
 
+// HELPER: Robust option extractor (copied from ReadingQuestions.tsx)
+// Checks nested AI format, flat DB format, and question-level format.
+const extractOptions = (raw: any): string[] => {
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === 'object' && Array.isArray(raw.options)) return raw.options;
+  return [];
+};
+
 export function ListeningQuestions({ 
   testId,
   questions, 
@@ -517,56 +525,73 @@ export function ListeningQuestions({
               })()
             ) : group.question_type === 'MULTIPLE_CHOICE_MULTIPLE' ? (
               (() => {
-                // Calculate question range for MCQ Multiple based on max_answers from group options
-                const maxAnswers = group.options?.max_answers || group.num_sub_questions || (group.end_question - group.start_question + 1);
-                const startQ = group.start_question;
-                const endQ = startQ + maxAnswers - 1;
-                const mcqQuestionRange = maxAnswers > 1 ? `${startQ}-${endQ}` : `${startQ}`;
+                // 1. GET DATA
+                const groupOptionsRaw = group.options;
+                const firstQ = groupQuestions[0];
                 
+                // 2. ROBUST OPTION EXTRACTION (Fixes "Missing Options" in Presets)
+                // Priority: 1. Group-level (AI/DB) -> 2. Question-level (Presets)
+                const optionsFromGroup = extractOptions(groupOptionsRaw);
+                const optionsFromQuestion = extractOptions((firstQ as any)?.options);
+                
+                // Use whatever valid options we found
+                const mcqOptions = optionsFromGroup.length > 0 ? optionsFromGroup : optionsFromQuestion;
+
+                // 3. CALCULATE VISUAL RANGE (Fixes "Question 1" -> "Questions 1-3")
+                // Fresh AI has max_answers in options; Admin Presets implied by range.
+                const maxAnswers = Number((groupOptionsRaw as any)?.max_answers) || 
+                                   (group.end_question - group.start_question + 1) || 
+                                   2;
+
+                const startQ = group.start_question;
+                // Force endQ to match the "Select X" count for visual correctness
+                const endQ = startQ + maxAnswers - 1; 
+                const mcqQuestionRange = maxAnswers > 1 ? `${startQ}-${endQ}` : `${startQ}`;
+
+                // 4. INFER FORMAT (A, B, C vs i, ii, iii)
+                const optionFormat = (groupOptionsRaw as any)?.option_format || (firstQ as any)?.option_format || 'A';
+
                 return (
-                  <div
-                    key={group.id}
-                    id={`question-${group.start_question}`}
-                    className="p-4 transition-all cursor-pointer"
-                    onPointerDownCapture={() => setCurrentQuestion(group.start_question)}
-                    onClick={() => setCurrentQuestion(group.start_question)}
-                  >
-                    <div className="flex items-start gap-3">
-                      {/* No question number badge for this type */}
+                  <div key={group.id} className="space-y-6">
+                     <div className="flex items-start gap-3">
                       <div className="flex-1 space-y-3">
-                        {/* Question Heading with proper range (if any) */}
-                        {groupQuestions[0]?.heading && (
-                          <div className="mb-2 font-bold text-foreground">
-                            <QuestionTextWithTools
-                              testId={testId}
-                              contentId={`${groupQuestions[0].id}-heading`}
-                              text={groupQuestions[0].heading.replace(/Questions?\s+\d+/i, `Questions ${mcqQuestionRange}`)}
-                              fontSize={fontSize}
-                              renderRichText={renderRichText}
-                              isActive={false} 
-                            />
-                          </div>
+                        {/* Heading with Corrected Range (e.g. Questions 1-3) */}
+                        {firstQ?.heading && (
+                           <div className="mb-2 font-bold text-foreground">
+                             <QuestionTextWithTools
+                               testId={testId}
+                               contentId={`${firstQ.id}-heading`}
+                               text={firstQ.heading.replace(/Questions?\s+\d+(?:[-–]\d+)?/i, `Questions ${mcqQuestionRange}`)}
+                               fontSize={fontSize}
+                               renderRichText={renderRichText}
+                               isActive={false}
+                             />
+                           </div>
                         )}
-                        {/* Main Question Text */}
+                        
+                        {/* Question Text (e.g. "Choose TWO letters") */}
                         <QuestionTextWithTools
-                          contentId={groupQuestions[0].id}
+                          contentId={firstQ.id}
                           testId={testId}
-                          text={groupQuestions[0].question_text}
+                          text={firstQ.question_text}
                           fontSize={fontSize}
                           renderRichText={renderRichText}
                           isActive={isActiveGroup}
                         />
-                        {/* Multiple Choice Multiple Answers Component */}
+
+                        {/* RENDER INPUT */}
                         <MultipleChoiceMultiple
                           testId={testId}
                           renderRichText={renderRichText}
                           question={{
-                            ...groupQuestions[0], // Pass the single logical question
-                            options: group.options?.options || [], // Use group-level options
-                            option_format: group.options?.option_format || 'A',
+                            id: firstQ.id,
+                            question_number: startQ, 
+                            question_text: firstQ.question_text,
+                            options: mcqOptions,
+                            option_format: optionFormat,
                           }}
-                          answer={answers[groupQuestions[0].question_number]}
-                          onAnswerChange={(value) => onAnswerChange(groupQuestions[0].question_number, value)}
+                          answer={answers[startQ]}
+                          onAnswerChange={(value) => onAnswerChange(startQ, value)}
                           isActive={isActiveGroup}
                           maxAnswers={maxAnswers}
                         />
