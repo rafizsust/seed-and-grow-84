@@ -466,7 +466,9 @@ export default function AIPracticeListeningTest() {
         }
 
         const groupQuestions: Question[] = group.questions.map((q) => {
-          const qt = normalizeType(q.question_type) || groupType;
+          // Use question-level type if it exists, otherwise fall back to group type
+          // Most AI payloads only have question_type at the group level, not on individual questions
+          const qt = (q.question_type ? normalizeType(q.question_type) : null) || groupType;
           
           // For TABLE_COMPLETION, also include table_data on the question if available
           // Check all possible locations for table_data
