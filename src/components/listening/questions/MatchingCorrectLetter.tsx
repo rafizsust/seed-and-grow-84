@@ -50,55 +50,6 @@ export function MatchingCorrectLetter({
     return String.fromCharCode(65 + index);
   };
 
-  // Replace underscore placeholders with the dropdown (no "______ [Select]" artifacts)
-  const underscorePattern = /_{2,}/;
-  const questionText = question.question_text || '';
-  const [beforeBlank, ...afterBlankParts] = questionText.split(underscorePattern);
-  const afterBlank = afterBlankParts.join('');
-  const hasBlank = afterBlankParts.length > 0;
-
-  const dropdown = (
-    <Select
-      value={answer || ''}
-      onValueChange={onAnswerChange}
-      disabled={question.is_given}
-    >
-      <SelectTrigger
-        className={cn(
-          "w-28 h-7 text-sm flex-shrink-0 rounded-[3px]",
-          "bg-[hsl(var(--ielts-input-bg,0_0%_100%))] border border-[hsl(var(--ielts-input-border))] text-foreground",
-          "focus:border-[hsl(var(--ielts-input-focus))] focus:ring-0",
-          "data-[state=open]:border-[hsl(var(--ielts-input-focus))]"
-        )}
-        style={{ fontFamily: 'var(--font-ielts)' }}
-      >
-        <div className="flex items-center gap-1.5 w-full">
-          <span className="font-semibold text-foreground">{question.question_number}</span>
-          {answer ? (
-            <span>{answer}</span>
-          ) : (
-            <span className="text-muted-foreground"></span>
-          )}
-        </div>
-      </SelectTrigger>
-      <SelectContent className="bg-background border border-[hsl(var(--ielts-input-border))] shadow-md z-50 rounded-[3px]">
-        {groupOptions.map((_optionText, idx) => {
-          const optionValue = getOptionLabel(idx, groupOptionFormat);
-          return (
-            <SelectItem
-              key={optionValue}
-              value={optionValue}
-              className="cursor-pointer"
-              style={{ fontFamily: 'var(--font-ielts)' }}
-            >
-              {optionValue}
-            </SelectItem>
-          );
-        })}
-      </SelectContent>
-    </Select>
-  );
-
   return (
     <div onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
       {/* Question Heading (if any) */}
@@ -110,53 +61,64 @@ export function MatchingCorrectLetter({
             text={question.heading}
             fontSize={fontSize}
             renderRichText={renderRichText}
-            isActive={false}
+            isActive={false} 
           />
         </div>
       )}
 
-      {/* Question text with inline dropdown replacing underscores */}
+      {/* Question text first, then dropdown with question number on right */}
       <div className="flex items-center flex-wrap gap-2">
-        {hasBlank ? (
-          <>
-            {beforeBlank.trim() && (
-              <QuestionTextWithTools
-                testId={testId}
-                contentId={`${question.id}-before`}
-                text={beforeBlank.trimEnd()}
-                fontSize={fontSize}
-                renderRichText={renderRichText}
-                isActive={false}
-                as="span"
-              />
+        {/* Question text only (no number before it) */}
+        <QuestionTextWithTools
+          testId={testId}
+          contentId={question.id}
+          text={question.question_text}
+          fontSize={fontSize}
+          renderRichText={renderRichText}
+          isActive={false}
+          as="span"
+        />
+        
+        {/* Dropdown with question number inside - matching Maps style */}
+        <Select
+          value={answer || ''}
+          onValueChange={onAnswerChange}
+          disabled={question.is_given}
+        >
+          <SelectTrigger
+            className={cn(
+              "w-28 h-7 text-sm flex-shrink-0 rounded-[3px]",
+              "bg-[hsl(var(--ielts-input-bg,0_0%_100%))] border border-[hsl(var(--ielts-input-border))] text-foreground",
+              "focus:border-[hsl(var(--ielts-input-focus))] focus:ring-0",
+              "data-[state=open]:border-[hsl(var(--ielts-input-focus))]"
             )}
-            {dropdown}
-            {afterBlank.trim() && (
-              <QuestionTextWithTools
-                testId={testId}
-                contentId={`${question.id}-after`}
-                text={afterBlank.trimStart()}
-                fontSize={fontSize}
-                renderRichText={renderRichText}
-                isActive={false}
-                as="span"
-              />
-            )}
-          </>
-        ) : (
-          <>
-            <QuestionTextWithTools
-              testId={testId}
-              contentId={question.id}
-              text={questionText}
-              fontSize={fontSize}
-              renderRichText={renderRichText}
-              isActive={false}
-              as="span"
-            />
-            {dropdown}
-          </>
-        )}
+            style={{ fontFamily: 'var(--font-ielts)' }}
+          >
+            <div className="flex items-center gap-1.5 w-full">
+              <span className="font-semibold text-foreground">{question.question_number}</span>
+              {answer ? (
+                <span>{answer}</span>
+              ) : (
+                <span className="text-muted-foreground"></span>
+              )}
+            </div>
+          </SelectTrigger>
+          <SelectContent className="bg-background border border-[hsl(var(--ielts-input-border))] shadow-md z-50 rounded-[3px]">
+            {groupOptions.map((_optionText, idx) => {
+              const optionValue = getOptionLabel(idx, groupOptionFormat);
+              return (
+                <SelectItem 
+                  key={optionValue} 
+                  value={optionValue}
+                  className="cursor-pointer"
+                  style={{ fontFamily: 'var(--font-ielts)' }}
+                >
+                  {optionValue}
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
       </div>
     </div>
   );
