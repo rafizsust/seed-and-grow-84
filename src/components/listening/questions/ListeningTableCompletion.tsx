@@ -25,9 +25,30 @@ export function ListeningTableCompletion({
   tableHeading,
   tableHeadingAlignment = 'left',
 }: ListeningTableCompletionProps) {
-  // First row is treated as headers
-  const headerRow = tableData.length > 0 ? tableData[0] : [];
-  const bodyRows = tableData.length > 1 ? tableData.slice(1) : [];
+  // HYBRID FIX: Support both Legacy Arrays (Cambridge) and New Objects (AI)
+  let rawRows: any[] = [];
+
+  if (Array.isArray(tableData)) {
+    // SCENARIO 1: Legacy/Cambridge (Already an Array) -> KEEP AS IS
+    rawRows = tableData;
+  } else if (typeof tableData === 'object' && tableData !== null) {
+    // SCENARIO 2: AI/New (Object with 'rows') -> Extract rows
+    rawRows = (tableData as any).rows || [];
+  }
+
+  // Normalization: Ensure keys are consistent (camelCase vs snake_case)
+  const normalizedRows = rawRows.map((row: any[]) =>
+    row.map((cell: any) => ({
+      ...cell,
+      hasQuestion: cell.hasQuestion ?? cell.has_question,
+      questionNumber: cell.questionNumber ?? cell.question_number,
+      content: cell.content ?? cell.text ?? ''
+    }))
+  );
+
+  // Use normalizedRows for rendering
+  const headerRow = normalizedRows.length > 0 ? normalizedRows[0] : [];
+  const bodyRows = normalizedRows.length > 1 ? normalizedRows.slice(1) : [];
 
   // Get alignment class
   const getAlignmentClass = (alignment?: string) => {
