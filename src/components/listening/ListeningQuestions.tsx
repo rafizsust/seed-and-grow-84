@@ -53,22 +53,70 @@ const stripLeadingQuestionNumber = (text: string, questionNumber: number): strin
 // HELPER: Robust option extractor with JSON Parsing
 const extractOptions = (raw: any): string[] => {
   if (!raw) return [];
+
+  // Direct array format
   if (Array.isArray(raw)) return raw;
-  
-  // Handle nested object from AI { options: [...] }
-  if (typeof raw === 'object' && Array.isArray(raw.options)) return raw.options;
-  
+
+  // Handle nested object from AI/DB { options: [...] }
+  if (typeof raw === 'object') {
+    if (Array.isArray(raw.options)) return raw.options;
+    // Sometimes: { options: { options: [...] } }
+    if (raw.options && typeof raw.options === 'object' && Array.isArray(raw.options.options)) {
+      return raw.options.options;
+    }
+    // Sometimes options themselves are stored as a JSON string
+    if (typeof raw.options === 'string') return extractOptions(raw.options);
+  }
+
   // FIX: Handle stringified JSON (Common in Admin Presets)
   if (typeof raw === 'string') {
     try {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-      if (parsed && Array.isArray(parsed.options)) return parsed.options;
+      return extractOptions(parsed);
     } catch (e) {
-      console.warn("Failed to parse MCMA options:", e);
+      console.warn('Failed to parse MCMA options:', e);
     }
   }
+
   return [];
+};
+
+// HELPER: Parse group options object (handles JSON strings)
+const parseOptionsObject = (raw: any): any => {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  return raw;
+};
+
+// HELPER: Infer max answers from instruction text (e.g. "Choose THREE letters")
+const inferMaxAnswersFromText = (text?: string | null): number | null => {
+  if (!text) return null;
+  const upper = text.toUpperCase();
+  const wordMap: Record<string, number> = {
+    ONE: 1,
+    TWO: 2,
+    THREE: 3,
+    FOUR: 4,
+    FIVE: 5,
+    SIX: 6,
+  };
+
+  const wordMatch = upper.match(/\b(ONE|TWO|THREE|FOUR|FIVE|SIX)\b/);
+  if (wordMatch?.[1] && wordMap[wordMatch[1]]) return wordMap[wordMatch[1]];
+
+  const digitMatch = upper.match(/\b(\d+)\b/);
+  if (digitMatch?.[1]) {
+    const n = Number(digitMatch[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  return null;
 };
 
 export function ListeningQuestions({ 
@@ -540,32 +588,40 @@ export function ListeningQuestions({
               (() => {
                 // 1. GET DATA
                 const groupOptionsRaw = group.options;
+                const groupOptionsObj: any = parseOptionsObject(groupOptionsRaw) ?? {};
                 const firstQ = groupQuestions[0];
                 
                 // 2. ROBUST OPTION EXTRACTION (Fixes "Missing Options" in Presets)
                 // Priority: 1. Group-level (AI/DB) -> 2. Question-level (Presets)
-                const optionsFromGroup = extractOptions(groupOptionsRaw);
+                const optionsFromGroup = extractOptions(groupOptionsObj?.options ?? groupOptionsRaw);
                 const optionsFromQuestion = extractOptions((firstQ as any)?.options);
                 
                 // Use whatever valid options we found
                 const mcqOptions = optionsFromGroup.length > 0 ? optionsFromGroup : optionsFromQuestion;
 
-                // 3. CALCULATE VISUAL RANGE (FIXED)
-                let maxAnswers = Number((groupOptionsRaw as any)?.max_answers);
-                
-                // If max_answers is missing, infer from range
+                // 3. CALCULATE VISUAL RANGE + MAX ANSWERS (ROBUST)
+                // Prefer explicit max_answers if present (including when group options are JSON strings)
+                let maxAnswers = Number(groupOptionsObj?.max_answers);
+
+                // Fallback: infer from text ("Choose THREE letters")
                 if (!maxAnswers) {
-                   const range = group.end_question - group.start_question + 1;
-                   // FIX: If range is 1 (common in AI single-obj gen), FORCE it to 2 for MCMA
-                   maxAnswers = range > 1 ? range : 2; 
+                  const inferred = inferMaxAnswersFromText(firstQ?.question_text);
+                  if (inferred) maxAnswers = inferred;
+                }
+
+                // Fallback: infer from DB range
+                if (!maxAnswers) {
+                  const range = group.end_question - group.start_question + 1;
+                  maxAnswers = range > 1 ? range : 2; // MCMA must allow at least 2
                 }
 
                 const startQ = group.start_question;
-                const endQ = startQ + maxAnswers - 1; 
+                const endQ = startQ + maxAnswers - 1;
                 const mcqQuestionRange = `${startQ}-${endQ}`; // Always show range for MCMA
 
                 // 4. INFER FORMAT (A, B, C vs i, ii, iii)
-                const optionFormat = (groupOptionsRaw as any)?.option_format || (firstQ as any)?.option_format || 'A';
+                const optionFormat =
+                  groupOptionsObj?.option_format || (groupOptionsRaw as any)?.option_format || (firstQ as any)?.option_format || 'A';
 
                 return (
                   <div key={group.id} className="space-y-6">
