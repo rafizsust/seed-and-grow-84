@@ -429,13 +429,23 @@ export function ListeningQuestions({
                 </h4>
               <div className="flex flex-col gap-y-2">
                 {group.options.options.map((optionText: unknown, idx: number) => {
-                    // FIX: Safe Normalizer to prevent "replace is not a function" crash
-                    // Handle null/undefined/non-string values from AI presets
-                    if (optionText === null || optionText === undefined) return null;
-                    const optStr = String(optionText);
-                    // Strip existing label prefix (e.g., "A.", "A ", "A. ", "B") from option text
-                    // Handles: "A Recommended", "A. Recommended", "A.Recommended", or just starts with letter
-                    const cleanedText = optStr.replace(/^[A-Za-z]\.?\s*/, '').trim();
+                    // FIX: Smart Normalizer to handle objects and prevent crashes
+                    const cleanOptionText = (text: any): string => {
+                      // 1. Null check
+                      if (text === null || text === undefined) return '';
+                      
+                      // 2. Handle Object (The Fix for [object Object])
+                      if (typeof text === 'object') {
+                        const content = text.text || text.content || text.label || text.value || text.description;
+                        if (content) return cleanOptionText(content);
+                        return '';
+                      }
+                      
+                      // 3. Handle String (Standard cleaning)
+                      return String(text).replace(/^[A-Za-z]\.?\s*/, '').trim();
+                    };
+                    
+                    const cleanedText = cleanOptionText(optionText);
                     if (!cleanedText) return null; // Skip empty options
                     return (
                       <div key={idx} className="text-sm text-foreground flex items-baseline">
